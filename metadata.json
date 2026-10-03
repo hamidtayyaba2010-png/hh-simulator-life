@@ -1,0 +1,6 @@
+{
+  "name": "Blue Luxury Dollhouse Villa Visualizer",
+  "description": "An interactive 3D Blue Luxury Dollhouse Villa visualizer with Minecraft-style character controls, first and third person camera, joystick, inventory, timeline, and architectural settings.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
