@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { TIMELINE_ENTRIES } from '../data/timelineData';
 import { ambientSound } from '../utils/audioManager';
 import {
@@ -161,12 +161,68 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
   const [isPhoneScreenOpen, setIsPhoneScreenOpen] = useState<boolean>(false);
   const [isPhoneUnlocked, setIsPhoneUnlocked] = useState<boolean>(false);
   const [phoneTouchStartY, setPhoneTouchStartY] = useState<number | null>(null);
+  const [phoneAppView, setPhoneAppView] = useState<'home' | 'settings_main' | 'settings_time_mode' | 'settings_real_time_countries'>('home');
+  const [mobileTimeMode, setMobileTimeMode] = useState<'game' | 'real'>('game');
+  const [selectedRealCountry, setSelectedRealCountry] = useState<'usa' | 'uk' | 'pakistan'>('usa');
+  const [realTimeTick, setRealTimeTick] = useState<number>(Date.now());
+  const [phoneFeedbackMsg, setPhoneFeedbackMsg] = useState<string | null>(null);
+
+  // Live real time updater for country clocks in mobile phone
+  useEffect(() => {
+    if (!isPhoneScreenOpen) return;
+    const interval = window.setInterval(() => {
+      setRealTimeTick(Date.now());
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [isPhoneScreenOpen]);
+
+  const getRealCountryTimeAndDate = useCallback((country: 'usa' | 'uk' | 'pakistan') => {
+    const timeZone =
+      country === 'usa'
+        ? 'America/New_York'
+        : country === 'uk'
+        ? 'Europe/London'
+        : 'Asia/Karachi';
+
+    const now = new Date();
+
+    const timeFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+    const fullDateFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+    const shortDateFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      month: 'short',
+      day: 'numeric',
+    });
+
+    return {
+      time: timeFormatter.format(now),
+      date: fullDateFormatter.format(now),
+      shortDate: shortDateFormatter.format(now),
+      countryLabel: country === 'usa' ? 'USA' : country === 'uk' ? 'UK' : 'Pakistan',
+      fullCountryName: country === 'usa' ? 'United States of America' : country === 'uk' ? 'United Kingdom' : 'Pakistan',
+      flag: country === 'usa' ? '🇺🇸' : country === 'uk' ? '🇬🇧' : '🇵🇰',
+    };
+  }, [realTimeTick]);
 
   // Auto-close full phone screen if mobile is dropped or returned to inventory
   useEffect(() => {
     if (heldItem !== 'phone') {
       setIsPhoneScreenOpen(false);
       setIsPhoneUnlocked(false);
+      setPhoneAppView('home');
     }
   }, [heldItem]);
 
@@ -2033,7 +2089,9 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
             <div
               className={`relative w-full h-full rounded-[38px] overflow-hidden flex flex-col justify-between transition-colors duration-300 ${
                 isPhoneUnlocked
-                  ? 'bg-[#7dd3fc]'
+                  ? phoneAppView !== 'home'
+                    ? 'bg-white'
+                    : 'bg-[#7dd3fc]'
                   : 'bg-gradient-to-b from-slate-900 via-slate-950 to-zinc-950'
               }`}
               onTouchStart={(e) => {
@@ -2060,15 +2118,33 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
                 setPhoneTouchStartY(null);
               }}
             >
+              {/* Floating Feedback Banner Inside Phone */}
+              {phoneFeedbackMsg && (
+                <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-black text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-2xl flex items-center gap-2 animate-bounce">
+                  <span>✓</span>
+                  <span>{phoneFeedbackMsg}</span>
+                </div>
+              )}
+
               {/* Top Status Bar & Dynamic Island */}
-              <div className="w-full pt-3 px-6 flex items-center justify-between z-20 pointer-events-none">
+              <div className="w-full pt-3 px-6 flex items-center justify-between z-20 pointer-events-none select-none">
                 {/* Time Display */}
                 <span
                   className={`text-xs font-bold font-mono tracking-tight flex items-center gap-1.5 ${
-                    isPhoneUnlocked ? 'text-slate-800' : 'text-slate-200'
+                    isPhoneUnlocked
+                      ? phoneAppView !== 'home'
+                        ? 'text-black'
+                        : 'text-slate-800'
+                      : 'text-slate-200'
                   }`}
                 >
-                  {autoTimeEnabled ? (
+                  {mobileTimeMode === 'real' ? (
+                    <>
+                      <span>{getRealCountryTimeAndDate(selectedRealCountry).time}</span>
+                      <span className="opacity-60">•</span>
+                      <span>{getRealCountryTimeAndDate(selectedRealCountry).countryLabel}</span>
+                    </>
+                  ) : autoTimeEnabled ? (
                     <>
                       <span>{autoTimeFormatted ?? '5:00 AM'}</span>
                       <span className="opacity-60">•</span>
@@ -2090,7 +2166,11 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
                 {/* Battery & Network Icons */}
                 <div
                   className={`flex items-center gap-1.5 text-xs font-semibold ${
-                    isPhoneUnlocked ? 'text-slate-800' : 'text-slate-200'
+                    isPhoneUnlocked
+                      ? phoneAppView !== 'home'
+                        ? 'text-black'
+                        : 'text-slate-800'
+                      : 'text-slate-200'
                   }`}
                 >
                   <span className="text-[10px]">5G</span>
@@ -2104,7 +2184,24 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
                 <div className="flex-1 flex flex-col justify-between items-center py-8 px-6 text-white">
                   {/* Top Lock Icon & Clock / Sky Time Display */}
                   <div className="flex flex-col items-center gap-2 mt-4 text-center">
-                    {autoTimeEnabled ? (
+                    {mobileTimeMode === 'real' ? (
+                      <>
+                        <span className="text-xl opacity-80">🔒</span>
+                        <h1 className="text-5xl font-light tracking-tight font-sans drop-shadow-md">
+                          {getRealCountryTimeAndDate(selectedRealCountry).time.replace(/ (AM|PM)/i, '')}
+                        </h1>
+                        <div className="flex items-center gap-2 px-3.5 py-1 rounded-full bg-slate-900/80 border border-emerald-400/40 text-emerald-300 shadow">
+                          <span className="text-base">{getRealCountryTimeAndDate(selectedRealCountry).flag}</span>
+                          <span className="text-xs font-bold tracking-wider">{getRealCountryTimeAndDate(selectedRealCountry).countryLabel}</span>
+                          <span className="text-[11px] font-mono text-slate-300">
+                            {getRealCountryTimeAndDate(selectedRealCountry).time.match(/(AM|PM)/i)?.[0] ?? ''}
+                          </span>
+                        </div>
+                        <span className="text-xs font-medium text-slate-400 mt-1">
+                          {getRealCountryTimeAndDate(selectedRealCountry).date}
+                        </span>
+                      </>
+                    ) : autoTimeEnabled ? (
                       <>
                         <span className="text-xl opacity-80">🔒</span>
                         <h1 className="text-5xl font-light tracking-tight font-sans drop-shadow-md">
@@ -2159,47 +2256,313 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
                   </div>
                 </div>
               ) : (
-                /* STATE 2: Unlocked Homescreen (Fully Light Blue Wallpaper, Only "Power Off" App with 🛑 icon in Upper Left Corner) */
-                <div className="flex-1 flex flex-col justify-between p-4">
-                  {/* Upper-Left Corner App Grid */}
-                  <div className="flex items-start justify-start pt-3 pl-2">
-                    {/* The Square Shape Power Off App with 🛑 Icon */}
-                    <button
-                      onClick={() => {
-                        // Power off mobile, return to off-state above joystick
-                        setIsPhoneScreenOpen(false);
-                        setIsPhoneUnlocked(false);
-                      }}
-                      className="flex flex-col items-center gap-1.5 group cursor-pointer active:scale-90 transition-transform"
-                      title="Power Off Mobile"
-                    >
-                      {/* Square Shape App Icon */}
-                      <div className="w-16 h-16 rounded-2xl bg-white/95 hover:bg-white border-2 border-white/80 shadow-[0_8px_20px_rgba(0,0,0,0.15)] flex items-center justify-center transition-all group-hover:shadow-[0_10px_25px_rgba(239,68,68,0.4)] group-hover:border-red-400">
-                        {/* 🛑 Icon */}
-                        <span className="text-3xl select-none group-hover:scale-110 transition-transform">
-                          🛑
-                        </span>
-                      </div>
-                      {/* App Name: "Power Off" */}
-                      <span className="text-xs font-bold text-slate-800 tracking-tight select-none drop-shadow-sm">
-                        Power Off
-                      </span>
-                    </button>
-                  </div>
+                /* STATE 2: Unlocked Screen */
+                <div className="flex-1 flex flex-col justify-between">
+                  {/* VIEW 1: Homescreen (Light Blue Wallpaper with Power Off and Settings App) */}
+                  {phoneAppView === 'home' && (
+                    <div className="flex-1 flex flex-col justify-between p-4">
+                      {/* Upper-Left Corner App Grid */}
+                      <div className="flex items-start justify-start pt-3 pl-2 gap-4">
+                        {/* 1. Square Shape "Power Off" App with 🛑 Icon */}
+                        <button
+                          onClick={() => {
+                            setIsPhoneScreenOpen(false);
+                            setIsPhoneUnlocked(false);
+                            setPhoneAppView('home');
+                          }}
+                          className="flex flex-col items-center gap-1.5 group cursor-pointer active:scale-90 transition-transform"
+                          title="Power Off Mobile"
+                        >
+                          <div className="w-16 h-16 rounded-2xl bg-white/95 hover:bg-white border-2 border-white/80 shadow-[0_8px_20px_rgba(0,0,0,0.15)] flex items-center justify-center transition-all group-hover:shadow-[0_10px_25px_rgba(239,68,68,0.4)] group-hover:border-red-400">
+                            <span className="text-3xl select-none group-hover:scale-110 transition-transform">
+                              🛑
+                            </span>
+                          </div>
+                          <span className="text-xs font-bold text-slate-800 tracking-tight select-none drop-shadow-sm">
+                            Power Off
+                          </span>
+                        </button>
 
-                  {/* Empty Screen Space (No other apps) */}
-                  <div className="flex-1" />
+                        {/* 2. Square Shape "Settings" App with ⚙️ Icon (Barabar mein / Right beside it) */}
+                        <button
+                          onClick={() => setPhoneAppView('settings_main')}
+                          className="flex flex-col items-center gap-1.5 group cursor-pointer active:scale-90 transition-transform"
+                          title="Settings"
+                        >
+                          <div className="w-16 h-16 rounded-2xl bg-white/95 hover:bg-white border-2 border-white/80 shadow-[0_8px_20px_rgba(0,0,0,0.15)] flex items-center justify-center transition-all group-hover:shadow-[0_10px_25px_rgba(59,130,246,0.4)] group-hover:border-blue-400">
+                            <span className="text-3xl select-none group-hover:rotate-90 transition-transform">
+                              ⚙️
+                            </span>
+                          </div>
+                          <span className="text-xs font-bold text-slate-800 tracking-tight select-none drop-shadow-sm">
+                            Settings
+                          </span>
+                        </button>
+                      </div>
+
+                      {/* Empty Screen Space */}
+                      <div className="flex-1" />
+                    </div>
+                  )}
+
+                  {/* VIEW 2: Settings Main Screen (Fully White with "Set time & date" row button) */}
+                  {phoneAppView === 'settings_main' && (
+                    <div className="flex-1 flex flex-col p-4 bg-white text-black">
+                      {/* Top Header Bar with Back Button */}
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                        <button
+                          onClick={() => setPhoneAppView('home')}
+                          className="px-2 py-1 rounded-lg hover:bg-slate-100 text-black font-bold text-xs sm:text-sm flex items-center gap-1 cursor-pointer transition active:scale-95"
+                          title="Back to Home"
+                        >
+                          <span>◀</span>
+                          <span>Home</span>
+                        </button>
+                        <h2 className="text-base font-bold text-black tracking-tight">Settings</h2>
+                        <div className="w-12" />
+                      </div>
+
+                      {/* Settings Content */}
+                      <div className="flex-1 flex flex-col pt-5 gap-3">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">
+                          General Settings
+                        </span>
+
+                        {/* Row Button: "Set time & date" (outline black, background transparent/white) */}
+                        <button
+                          onClick={() => setPhoneAppView('settings_time_mode')}
+                          className="w-full py-3.5 px-4 rounded-xl border-2 border-black bg-transparent hover:bg-black/5 active:scale-[0.99] text-left flex items-center justify-between text-black font-semibold text-sm sm:text-base cursor-pointer shadow-sm transition-all"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-lg">🕒</span>
+                            <span>Set time & date</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
+                            <span className="capitalize">
+                              {mobileTimeMode === 'real'
+                                ? `Real (${getRealCountryTimeAndDate(selectedRealCountry).countryLabel})`
+                                : 'Game Time'}
+                            </span>
+                            <span className="text-base font-bold">›</span>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* VIEW 3: Time & Date Options Screen (2 Options: "Set real time & date" and "Set game time") */}
+                  {phoneAppView === 'settings_time_mode' && (
+                    <div className="flex-1 flex flex-col p-4 bg-white text-black">
+                      {/* Top Header Bar with Back Button */}
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                        <button
+                          onClick={() => setPhoneAppView('settings_main')}
+                          className="px-2 py-1 rounded-lg hover:bg-slate-100 text-black font-bold text-xs sm:text-sm flex items-center gap-1 cursor-pointer transition active:scale-95"
+                          title="Back to Settings"
+                        >
+                          <span>◀</span>
+                          <span>Settings</span>
+                        </button>
+                        <h2 className="text-base font-bold text-black tracking-tight">Time & Date</h2>
+                        <div className="w-16" />
+                      </div>
+
+                      {/* 2 Options Content */}
+                      <div className="flex-1 flex flex-col pt-5 gap-3.5">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">
+                          Choose Time Source
+                        </span>
+
+                        {/* Option 1: "Set real time & date" */}
+                        <button
+                          onClick={() => setPhoneAppView('settings_real_time_countries')}
+                          className="w-full py-3.5 px-4 rounded-xl border-2 border-black bg-transparent hover:bg-black/5 active:scale-[0.99] text-left flex items-center justify-between text-black font-semibold text-sm sm:text-base cursor-pointer shadow-sm transition-all"
+                        >
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg">🌍</span>
+                              <span>Set real time & date</span>
+                            </div>
+                            <span className="text-[11px] text-slate-500 font-normal pl-7">
+                              USA, UK, or Pakistan Live Time
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 text-xs font-bold text-black/70">
+                            {mobileTimeMode === 'real' && (
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                                ✓ Active
+                              </span>
+                            )}
+                            <span className="text-base">›</span>
+                          </div>
+                        </button>
+
+                        {/* Option 2: "Set game time" */}
+                        <button
+                          onClick={() => {
+                            setMobileTimeMode('game');
+                            setPhoneFeedbackMsg("Game Time Restored!");
+                            setTimeout(() => setPhoneFeedbackMsg(null), 2500);
+                          }}
+                          className={`w-full py-3.5 px-4 rounded-xl border-2 border-black bg-transparent hover:bg-black/5 active:scale-[0.99] text-left flex items-center justify-between text-black font-semibold text-sm sm:text-base cursor-pointer shadow-sm transition-all ${
+                            mobileTimeMode === 'game' ? 'bg-amber-50/70 border-amber-600' : ''
+                          }`}
+                        >
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg">🎮</span>
+                              <span>Set game time</span>
+                            </div>
+                            <span className="text-[11px] text-slate-500 font-normal pl-7">
+                              {autoTimeEnabled ? 'Auto Time (Running)' : `Sky Time (${getTimeLabel(timeOfDay)})`}
+                            </span>
+                          </div>
+                          {mobileTimeMode === 'game' && (
+                            <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold">
+                              ✓ Active
+                            </span>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* VIEW 4: Real Time 3 Countries Screen (USA, UK, Pakistan) */}
+                  {phoneAppView === 'settings_real_time_countries' && (
+                    <div className="flex-1 flex flex-col p-4 bg-white text-black">
+                      {/* Top Header Bar with Back Button */}
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                        <button
+                          onClick={() => setPhoneAppView('settings_time_mode')}
+                          className="px-2 py-1 rounded-lg hover:bg-slate-100 text-black font-bold text-xs sm:text-sm flex items-center gap-1 cursor-pointer transition active:scale-95"
+                          title="Back"
+                        >
+                          <span>◀</span>
+                          <span>Back</span>
+                        </button>
+                        <h2 className="text-base font-bold text-black tracking-tight">Select Country</h2>
+                        <div className="w-12" />
+                      </div>
+
+                      {/* 3 Countries List */}
+                      <div className="flex-1 flex flex-col pt-4 gap-3">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">
+                          Select Country for Real Time
+                        </span>
+
+                        {/* Country 1: United States of America */}
+                        <button
+                          onClick={() => {
+                            setSelectedRealCountry('usa');
+                            setMobileTimeMode('real');
+                            setPhoneFeedbackMsg("USA Real Time Set!");
+                            setTimeout(() => setPhoneFeedbackMsg(null), 2500);
+                          }}
+                          className={`w-full py-3.5 px-4 rounded-xl border-2 border-black bg-transparent hover:bg-black/5 active:scale-[0.99] text-left flex items-center justify-between text-black font-semibold text-sm cursor-pointer shadow-sm transition-all ${
+                            mobileTimeMode === 'real' && selectedRealCountry === 'usa'
+                              ? 'bg-emerald-50/70 border-emerald-600 ring-2 ring-emerald-500/30'
+                              : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl select-none">🇺🇸</span>
+                            <div className="flex flex-col">
+                              <span className="font-bold text-black">United States of America</span>
+                              <span className="text-[11px] text-slate-500 font-mono">
+                                {getRealCountryTimeAndDate('usa').time} • {getRealCountryTimeAndDate('usa').shortDate}
+                              </span>
+                            </div>
+                          </div>
+                          {mobileTimeMode === 'real' && selectedRealCountry === 'usa' ? (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-bold">
+                              ✓ Active
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-400 font-semibold">Select</span>
+                          )}
+                        </button>
+
+                        {/* Country 2: United Kingdom */}
+                        <button
+                          onClick={() => {
+                            setSelectedRealCountry('uk');
+                            setMobileTimeMode('real');
+                            setPhoneFeedbackMsg("UK Real Time Set!");
+                            setTimeout(() => setPhoneFeedbackMsg(null), 2500);
+                          }}
+                          className={`w-full py-3.5 px-4 rounded-xl border-2 border-black bg-transparent hover:bg-black/5 active:scale-[0.99] text-left flex items-center justify-between text-black font-semibold text-sm cursor-pointer shadow-sm transition-all ${
+                            mobileTimeMode === 'real' && selectedRealCountry === 'uk'
+                              ? 'bg-emerald-50/70 border-emerald-600 ring-2 ring-emerald-500/30'
+                              : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl select-none">🇬🇧</span>
+                            <div className="flex flex-col">
+                              <span className="font-bold text-black">United Kingdom</span>
+                              <span className="text-[11px] text-slate-500 font-mono">
+                                {getRealCountryTimeAndDate('uk').time} • {getRealCountryTimeAndDate('uk').shortDate}
+                              </span>
+                            </div>
+                          </div>
+                          {mobileTimeMode === 'real' && selectedRealCountry === 'uk' ? (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-bold">
+                              ✓ Active
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-400 font-semibold">Select</span>
+                          )}
+                        </button>
+
+                        {/* Country 3: Pakistan */}
+                        <button
+                          onClick={() => {
+                            setSelectedRealCountry('pakistan');
+                            setMobileTimeMode('real');
+                            setPhoneFeedbackMsg("Pakistan Real Time Set!");
+                            setTimeout(() => setPhoneFeedbackMsg(null), 2500);
+                          }}
+                          className={`w-full py-3.5 px-4 rounded-xl border-2 border-black bg-transparent hover:bg-black/5 active:scale-[0.99] text-left flex items-center justify-between text-black font-semibold text-sm cursor-pointer shadow-sm transition-all ${
+                            mobileTimeMode === 'real' && selectedRealCountry === 'pakistan'
+                              ? 'bg-emerald-50/70 border-emerald-600 ring-2 ring-emerald-500/30'
+                              : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl select-none">🇵🇰</span>
+                            <div className="flex flex-col">
+                              <span className="font-bold text-black">Pakistan</span>
+                              <span className="text-[11px] text-slate-500 font-mono">
+                                {getRealCountryTimeAndDate('pakistan').time} • {getRealCountryTimeAndDate('pakistan').shortDate}
+                              </span>
+                            </div>
+                          </div>
+                          {mobileTimeMode === 'real' && selectedRealCountry === 'pakistan' ? (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-bold">
+                              ✓ Active
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-400 font-semibold">Select</span>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Bottom Home Indicator Bar */}
-                  <div className="w-full flex justify-center pb-2">
+                  <div className="w-full flex justify-center pb-2 pt-1 bg-inherit">
                     <div
                       onClick={() => {
-                        // Power off mobile and return to off-state above joystick
-                        setIsPhoneScreenOpen(false);
-                        setIsPhoneUnlocked(false);
+                        if (phoneAppView !== 'home') {
+                          setPhoneAppView('home');
+                        } else {
+                          // Power off mobile and return to off-state above joystick
+                          setIsPhoneScreenOpen(false);
+                          setIsPhoneUnlocked(false);
+                        }
                       }}
-                      className="w-32 h-1.5 bg-slate-800/50 hover:bg-slate-800 rounded-full cursor-pointer transition-all"
-                      title="Home Gesture"
+                      className="w-32 h-1.5 bg-slate-800/50 hover:bg-slate-800 rounded-full cursor-pointer transition-all active:scale-95"
+                      title={phoneAppView !== 'home' ? 'Return to Home' : 'Power Off'}
                     />
                   </div>
                 </div>
