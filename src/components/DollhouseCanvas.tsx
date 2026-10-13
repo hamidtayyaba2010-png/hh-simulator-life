@@ -31,6 +31,8 @@ interface DollhouseCanvasProps {
   customHouseBlueColor?: string | null;
   customHouseWhiteColor?: string | null;
   droppedPhone?: DroppedPhoneData | null;
+  heldItem?: string | null;
+  isFlashlightOn?: boolean;
   onDropCoordsRef?: React.MutableRefObject<(() => DroppedPhoneData) | null>;
   onAimAtPhoneChange?: (isAiming: boolean) => void;
 }
@@ -63,6 +65,8 @@ export const DollhouseCanvas: React.FC<DollhouseCanvasProps> = ({
   customHouseBlueColor,
   customHouseWhiteColor,
   droppedPhone,
+  heldItem = null,
+  isFlashlightOn = false,
   onDropCoordsRef,
   onAimAtPhoneChange,
 }) => {
@@ -72,6 +76,12 @@ export const DollhouseCanvas: React.FC<DollhouseCanvasProps> = ({
 
   const droppedPhoneRef = useRef<DroppedPhoneData | null | undefined>(droppedPhone);
   droppedPhoneRef.current = droppedPhone;
+
+  const heldItemRef = useRef<string | null>(heldItem);
+  heldItemRef.current = heldItem;
+
+  const isFlashlightOnRef = useRef<boolean>(isFlashlightOn);
+  isFlashlightOnRef.current = isFlashlightOn;
 
   const playerSpeedMultiplierRef = useRef<number>(playerSpeedMultiplier);
   playerSpeedMultiplierRef.current = playerSpeedMultiplier;
@@ -137,6 +147,15 @@ export const DollhouseCanvas: React.FC<DollhouseCanvasProps> = ({
     playerShoesMat: THREE.MeshStandardMaterial | null;
     droppedPhoneGroup: THREE.Group | null;
     droppedPhoneRingMat: THREE.MeshBasicMaterial | null;
+    heldPhoneMesh: THREE.Group | null;
+    fpHeldPhoneMesh: THREE.Group | null;
+    flashlightSpot: THREE.SpotLight | null;
+    flashlightPoint: THREE.PointLight | null;
+    flashlightTarget: THREE.Object3D | null;
+    droppedFlashlightPoint: THREE.PointLight | null;
+    droppedFlashlightSpot: THREE.SpotLight | null;
+    droppedFlashlightTarget: THREE.Object3D | null;
+    phoneLedMat: THREE.MeshBasicMaterial | null;
     currentSkyDesign: SkyDesign;
     playerVelocityY: number;
     isGrounded: boolean;
@@ -200,6 +219,15 @@ export const DollhouseCanvas: React.FC<DollhouseCanvasProps> = ({
     playerShoesMat: null as THREE.MeshStandardMaterial | null,
     droppedPhoneGroup: null as THREE.Group | null,
     droppedPhoneRingMat: null as THREE.MeshBasicMaterial | null,
+    heldPhoneMesh: null as THREE.Group | null,
+    fpHeldPhoneMesh: null as THREE.Group | null,
+    flashlightSpot: null as THREE.SpotLight | null,
+    flashlightPoint: null as THREE.PointLight | null,
+    flashlightTarget: null as THREE.Object3D | null,
+    droppedFlashlightPoint: null as THREE.PointLight | null,
+    droppedFlashlightSpot: null as THREE.SpotLight | null,
+    droppedFlashlightTarget: null as THREE.Object3D | null,
+    phoneLedMat: null as THREE.MeshBasicMaterial | null,
     currentSkyDesign: null,
     playerVelocityY: 0,
     isGrounded: true,
@@ -1377,6 +1405,14 @@ export const DollhouseCanvas: React.FC<DollhouseCanvasProps> = ({
     home.position.set(0, 0.026, 0.28);
     phoneGroup.add(home);
 
+    // 4b. Flashlight LED lens
+    const droppedLed = new THREE.Mesh(
+      new THREE.SphereGeometry(0.035, 12, 12),
+      s.phoneLedMat || new THREE.MeshBasicMaterial({ color: 0x334155 })
+    );
+    droppedLed.position.set(0, 0.026, -0.32);
+    phoneGroup.add(droppedLed);
+
     // 5. Pulsing glowing interaction ring on ground
     const ringGeo = new THREE.RingGeometry(0.48, 0.54, 32);
     const ringMat = new THREE.MeshBasicMaterial({
@@ -1454,6 +1490,36 @@ export const DollhouseCanvas: React.FC<DollhouseCanvasProps> = ({
     dirLight.shadow.mapSize.height = 1024;
     dirLight.shadow.bias = -0.0005;
     scene.add(dirLight);
+
+    // Flashlight Spot & Point Lights for Hand-held Phone
+    const flashlightSpot = new THREE.SpotLight(0xfffaed, 0, 52, Math.PI / 4.2, 0.45, 1.2);
+    flashlightSpot.castShadow = true;
+    flashlightSpot.shadow.bias = -0.001;
+    flashlightSpot.shadow.mapSize.width = 512;
+    flashlightSpot.shadow.mapSize.height = 512;
+
+    const flashlightPoint = new THREE.PointLight(0xfffaed, 0, 10, 1.6);
+    const flashlightTarget = new THREE.Object3D();
+    scene.add(flashlightTarget);
+    flashlightSpot.target = flashlightTarget;
+    scene.add(flashlightSpot);
+    scene.add(flashlightPoint);
+
+    // Flashlight Lights for Dropped Phone on Ground
+    const droppedFlashlightSpot = new THREE.SpotLight(0xfffaed, 0, 32, Math.PI / 3.8, 0.5, 1.2);
+    const droppedFlashlightPoint = new THREE.PointLight(0xfffaed, 0, 18, 1.3);
+    const droppedFlashlightTarget = new THREE.Object3D();
+    scene.add(droppedFlashlightTarget);
+    droppedFlashlightSpot.target = droppedFlashlightTarget;
+    scene.add(droppedFlashlightSpot);
+    scene.add(droppedFlashlightPoint);
+
+    stateRef.current.flashlightSpot = flashlightSpot;
+    stateRef.current.flashlightPoint = flashlightPoint;
+    stateRef.current.flashlightTarget = flashlightTarget;
+    stateRef.current.droppedFlashlightSpot = droppedFlashlightSpot;
+    stateRef.current.droppedFlashlightPoint = droppedFlashlightPoint;
+    stateRef.current.droppedFlashlightTarget = droppedFlashlightTarget;
 
     // MATERIALS
     const primaryColor = houseTheme === 'pink' ? 0xec4899 : houseTheme === 'modern' ? 0x334155 : houseTheme === 'gold' ? 0xd97706 : 0x1d4ed8;
@@ -2198,6 +2264,38 @@ export const DollhouseCanvas: React.FC<DollhouseCanvasProps> = ({
     rArmMesh.position.y = -0.45;
     rArmMesh.castShadow = true;
     rightArm.add(rArmMesh);
+
+    // 3D Phone in player's right hand
+    const handPhone = new THREE.Group();
+    handPhone.name = 'handPhoneGroup';
+
+    const hpBodyMat = new THREE.MeshStandardMaterial({
+      color: 0x0f172a,
+      metalness: 0.85,
+      roughness: 0.25,
+    });
+    const hpBody = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.024, 0.36), hpBodyMat);
+    handPhone.add(hpBody);
+
+    const hpScreen = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.16, 0.33),
+      new THREE.MeshStandardMaterial({ color: 0x020617, roughness: 0.15 })
+    );
+    hpScreen.rotation.x = -Math.PI / 2;
+    hpScreen.position.y = 0.013;
+    handPhone.add(hpScreen);
+
+    // Flashlight LED lens
+    const phoneLedMat = new THREE.MeshBasicMaterial({ color: 0x334155 });
+    const led = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 12), phoneLedMat);
+    led.position.set(0, 0.014, -0.16);
+    handPhone.add(led);
+
+    // Position phone inside hand
+    handPhone.position.set(0, -0.92, -0.10);
+    handPhone.rotation.set(-Math.PI / 2.2, 0, 0);
+    rightArm.add(handPhone);
+
     rightArm.position.set(0.58, 1.4, 0);
     playerGroup.add(rightArm);
 
@@ -2239,9 +2337,31 @@ export const DollhouseCanvas: React.FC<DollhouseCanvasProps> = ({
     hand.position.set(0, -0.42, 0);
     fpHandGroup.add(hand);
 
+    // Phone in first person hand
+    const fpHeldPhone = new THREE.Group();
+    fpHeldPhone.name = 'fpHeldPhoneGroup';
+    const fpHpBody = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.024, 0.36), hpBodyMat);
+    fpHeldPhone.add(fpHpBody);
+
+    const fpHpScreen = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.16, 0.33),
+      new THREE.MeshStandardMaterial({ color: 0x020617, roughness: 0.15 })
+    );
+    fpHpScreen.rotation.x = -Math.PI / 2;
+    fpHpScreen.position.y = 0.013;
+    fpHeldPhone.add(fpHpScreen);
+
+    const fpLed = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 12), phoneLedMat);
+    fpLed.position.set(0, 0.014, -0.16);
+    fpHeldPhone.add(fpLed);
+
+    fpHeldPhone.position.set(0, -0.44, -0.12);
+    fpHeldPhone.rotation.set(-Math.PI / 2.3, 0, 0);
+    fpHandGroup.add(fpHeldPhone);
+
     fpHandGroup.position.set(0.38, -0.32, -0.65);
     fpHandGroup.rotation.set(0.35, -0.25, 0.08);
-    fpHandGroup.visible = perspective === 'first-person';
+    fpHandGroup.visible = perspective === 'first-person' && heldItem === 'phone';
 
     camera.add(fpHandGroup);
     scene.add(camera);
@@ -2257,6 +2377,9 @@ export const DollhouseCanvas: React.FC<DollhouseCanvasProps> = ({
     stateRef.current.playerGroup = playerGroup;
     stateRef.current.leftArm = leftArm;
     stateRef.current.rightArm = rightArm;
+    stateRef.current.heldPhoneMesh = handPhone;
+    stateRef.current.fpHeldPhoneMesh = fpHeldPhone;
+    stateRef.current.phoneLedMat = phoneLedMat;
     stateRef.current.leftLeg = leftLeg;
     stateRef.current.rightLeg = rightLeg;
     stateRef.current.fpHandGroup = fpHandGroup;
@@ -2752,9 +2875,13 @@ export const DollhouseCanvas: React.FC<DollhouseCanvasProps> = ({
           const swing = Math.sin(s.walkCycleTime) * 0.6;
 
           if (curPerspective === 'third-person') {
-            if (s.leftArm && s.rightArm) {
-              s.leftArm.rotation.x = swing;
-              s.rightArm.rotation.x = -swing;
+            if (s.leftArm) s.leftArm.rotation.x = swing;
+            if (s.rightArm) {
+              if (heldItemRef.current === 'phone') {
+                s.rightArm.rotation.x = -0.55 + swing * 0.12;
+              } else {
+                s.rightArm.rotation.x = -swing;
+              }
             }
             if (s.leftLeg && s.rightLeg) {
               s.leftLeg.rotation.x = -swing;
@@ -2763,7 +2890,13 @@ export const DollhouseCanvas: React.FC<DollhouseCanvasProps> = ({
           }
         } else {
           if (s.leftArm) s.leftArm.rotation.x = 0;
-          if (s.rightArm) s.rightArm.rotation.x = 0;
+          if (s.rightArm) {
+            if (heldItemRef.current === 'phone') {
+              s.rightArm.rotation.x = -0.55;
+            } else {
+              s.rightArm.rotation.x = 0;
+            }
+          }
           if (s.leftLeg) s.leftLeg.rotation.x = 0;
           if (s.rightLeg) s.rightLeg.rotation.x = 0;
         }
@@ -2773,7 +2906,9 @@ export const DollhouseCanvas: React.FC<DollhouseCanvasProps> = ({
         if (curPerspective === 'first-person') {
           // In first-person: hide player completely so view of world in front is unobstructed
           s.playerGroup.visible = false;
-          if (s.fpHandGroup) s.fpHandGroup.visible = false;
+          if (s.fpHandGroup) {
+            s.fpHandGroup.visible = heldItemRef.current === 'phone';
+          }
           s.camera.position.copy(playerEyePos);
           const lookDir = new THREE.Vector3(
             Math.sin(s.fpYaw) * Math.cos(s.fpPitch),
@@ -2789,6 +2924,77 @@ export const DollhouseCanvas: React.FC<DollhouseCanvasProps> = ({
           s.controls.target.copy(playerEyePos);
           s.camera.position.add(targetDelta);
         }
+      }
+
+      // FLASHLIGHT SYSTEM DYNAMICS (Handheld & Dropped Phone)
+      const isFlashOn = isFlashlightOnRef.current;
+      const currentHeld = heldItemRef.current;
+      const activePhone = droppedPhoneRef.current;
+      const curPersp = perspectiveRef.current;
+
+      // 1. Handheld Phone visibility & LED color
+      if (s.heldPhoneMesh) {
+        s.heldPhoneMesh.visible = (curPersp === 'third-person' && currentHeld === 'phone');
+      }
+      if (s.phoneLedMat) {
+        if (isFlashOn) {
+          s.phoneLedMat.color.setHex(0xffffff);
+        } else {
+          s.phoneLedMat.color.setHex(0x334155);
+        }
+      }
+
+      // 2. Handheld Flashlight Beam
+      if (currentHeld === 'phone' && isFlashOn && s.flashlightSpot && s.flashlightPoint && s.flashlightTarget) {
+        if (curPersp === 'first-person' && s.camera) {
+          const camPos = s.camera.position;
+          const camDir = new THREE.Vector3();
+          s.camera.getWorldDirection(camDir);
+
+          s.flashlightSpot.position.copy(camPos).addScaledVector(camDir, 0.2);
+          s.flashlightTarget.position.copy(camPos).addScaledVector(camDir, 16);
+          s.flashlightPoint.position.copy(camPos);
+
+          s.flashlightSpot.intensity = 6.8;
+          s.flashlightPoint.intensity = 1.8;
+        } else if (s.playerGroup) {
+          const handPos = new THREE.Vector3();
+          if (s.heldPhoneMesh) {
+            s.heldPhoneMesh.getWorldPosition(handPos);
+          } else {
+            handPos.copy(s.playerGroup.position).add(new THREE.Vector3(0.55, 0.9, 0));
+          }
+
+          const facing = s.playerGroup.rotation.y;
+          const forward = new THREE.Vector3(Math.sin(facing), -0.06, Math.cos(facing)).normalize();
+
+          s.flashlightSpot.position.copy(handPos);
+          s.flashlightTarget.position.copy(handPos).addScaledVector(forward, 16);
+          s.flashlightPoint.position.copy(handPos);
+
+          s.flashlightSpot.intensity = 6.5;
+          s.flashlightPoint.intensity = 1.9;
+        }
+      } else if (s.flashlightSpot && s.flashlightPoint) {
+        s.flashlightSpot.intensity = 0;
+        s.flashlightPoint.intensity = 0;
+      }
+
+      // 3. Dropped Phone Flashlight (Shining across ground and surrounding area)
+      if (activePhone && isFlashOn && s.droppedFlashlightSpot && s.droppedFlashlightPoint && s.droppedFlashlightTarget) {
+        const phoneGroundPos = new THREE.Vector3(activePhone.x, activePhone.y + 0.14, activePhone.z);
+        const rotY = activePhone.rotationY || 0;
+        const phoneForward = new THREE.Vector3(Math.sin(rotY), 0.04, Math.cos(rotY)).normalize();
+
+        s.droppedFlashlightSpot.position.copy(phoneGroundPos);
+        s.droppedFlashlightTarget.position.copy(phoneGroundPos).addScaledVector(phoneForward, 14);
+        s.droppedFlashlightPoint.position.copy(phoneGroundPos);
+
+        s.droppedFlashlightSpot.intensity = 5.8;
+        s.droppedFlashlightPoint.intensity = 3.6; // Clearly illuminates surrounding area
+      } else if (s.droppedFlashlightSpot && s.droppedFlashlightPoint) {
+        s.droppedFlashlightSpot.intensity = 0;
+        s.droppedFlashlightPoint.intensity = 0;
       }
 
       // Crosshair / Aim detection on dropped phone in First-Person view

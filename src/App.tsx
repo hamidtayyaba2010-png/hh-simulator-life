@@ -76,6 +76,7 @@ export default function App() {
     null,
   ]);
   const [heldItem, setHeldItem] = useState<string | null>(null);
+  const [isFlashlightOn, setIsFlashlightOn] = useState<boolean>(false);
   const [droppedPhone, setDroppedPhone] = useState<DroppedPhoneData | null>(null);
   const [canPickupPhone, setCanPickupPhone] = useState<boolean>(false);
   const dropCoordsRef = useRef<(() => DroppedPhoneData) | null>(null);
@@ -94,6 +95,7 @@ export default function App() {
         const updated = [...prev];
         updated[index] = 'phone';
         setHeldItem(null);
+        setIsFlashlightOn(false);
         return updated;
       }
       return prev;
@@ -619,6 +621,8 @@ export default function App() {
         customHouseBlueColor={customHouseBlueColor}
         customHouseWhiteColor={customHouseWhiteColor}
         droppedPhone={droppedPhone}
+        heldItem={heldItem}
+        isFlashlightOn={isFlashlightOn}
         onDropCoordsRef={dropCoordsRef}
         onAimAtPhoneChange={setCanPickupPhone}
       />
@@ -672,6 +676,8 @@ export default function App() {
         heldItem={heldItem}
         canPickupPhone={canPickupPhone}
         onHandAction={handleHandAction}
+        isFlashlightOn={isFlashlightOn}
+        onToggleFlashlight={setIsFlashlightOn}
       />
 
       {/* Full-Screen House Selection, 3D View, Info & Color Customization Screen */}

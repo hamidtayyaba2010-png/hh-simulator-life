@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { TIMELINE_ENTRIES } from '../data/timelineData';
+import {
+  WALLPAPER_IMAGE_CATEGORIES,
+  WALLPAPER_FACES_EMOJIS,
+  WallpaperImageCategory,
+  searchWallpaperEmojis,
+  EmojiSearchMatch,
+} from '../data/wallpaperEmojiCategories';
 import { ambientSound } from '../utils/audioManager';
 import {
   deleteLobby,
@@ -62,6 +69,8 @@ interface DollhouseUIProps {
   heldItem: string | null;
   canPickupPhone: boolean;
   onHandAction: () => void;
+  isFlashlightOn?: boolean;
+  onToggleFlashlight?: (on: boolean) => void;
 }
 
 const getTimeLabel = (time?: TimeOfDay): string => {
@@ -106,6 +115,117 @@ const getTimeIcon = (time?: TimeOfDay): string => {
   }
 };
 
+export type PhoneAppView =
+  | 'home'
+  | 'settings_main'
+  | 'settings_time_mode'
+  | 'settings_real_time_countries'
+  | 'settings_wallpaper_main'
+  | 'settings_wallpaper_create'
+  | 'settings_wallpaper_count'
+  | 'settings_wallpaper_direction'
+  | 'settings_wallpaper_colors'
+  | 'settings_wallpaper_image_categories'
+  | 'settings_wallpaper_faces'
+  | 'settings_wallpaper_emoji_editor';
+
+export type WallpaperDirection =
+  | 'right'
+  | 'left'
+  | 'up'
+  | 'down'
+  | 'top_right'
+  | 'top_left'
+  | 'bottom_right'
+  | 'bottom_left';
+
+export interface WallpaperPlacedEmoji {
+  id: string;
+  emoji: string;
+  x: number;
+  y: number;
+  scale: number;
+}
+
+export interface PhoneWallpaper {
+  type: 'default' | 'color' | 'pattern' | 'image';
+  value: string;
+  colors?: string[];
+  direction?: WallpaperDirection;
+  overlayEmoji?: string | null;
+  placedEmojis?: WallpaperPlacedEmoji[];
+}
+
+export interface WallpaperColorOption {
+  name: string;
+  emoji: string;
+  hex: string;
+}
+
+export const WALLPAPER_COLORS: WallpaperColorOption[] = [
+  { name: 'Green', emoji: '🟩', hex: '#22c55e' },
+  { name: 'Yellow', emoji: '🟨', hex: '#eab308' },
+  { name: 'Orange', emoji: '🟧', hex: '#f97316' },
+  { name: 'Red', emoji: '🟥', hex: '#ef4444' },
+  { name: 'Blue', emoji: '🟦', hex: '#2563eb' },
+  { name: 'Purple', emoji: '🟪', hex: '#9333ea' },
+  { name: 'Black', emoji: '⬛', hex: '#000000' },
+  { name: 'White', emoji: '⬜', hex: '#ffffff' },
+  { name: 'Gray', emoji: '🌫️', hex: '#6b7280' },
+  { name: 'Pink', emoji: '🩷', hex: '#ec4899' },
+  { name: 'Light Brown', emoji: '🏼', hex: '#d4a373' },
+  { name: 'Mid Brown', emoji: '🏽', hex: '#a0522d' },
+  { name: 'Brown 3', emoji: '🟫', hex: '#5c2c16' },
+  { name: 'Light Purple', emoji: '🟣', hex: '#c084fc' },
+  { name: 'Light Blue', emoji: '🔵', hex: '#7dd3fc' },
+  { name: 'Light green', emoji: '🟢', hex: '#86efac' },
+];
+
+export const WALLPAPER_DIRECTIONS: { key: WallpaperDirection; label: string; icon: string }[] = [
+  { key: 'right', label: 'Horizontally Right', icon: '➡️' },
+  { key: 'left', label: 'Horizontally Left', icon: '⬅️' },
+  { key: 'up', label: 'Vertically Up', icon: '⬆️' },
+  { key: 'down', label: 'Vertically Down', icon: '⬇️' },
+  { key: 'top_right', label: 'Top Right Corner', icon: '↗️' },
+  { key: 'top_left', label: 'Top Left Corner', icon: '↖️' },
+  { key: 'bottom_right', label: 'Bottom Right Corner', icon: '↘️' },
+  { key: 'bottom_left', label: 'Bottom Left Corner', icon: '↙️' },
+];
+
+
+
+export {
+  WALLPAPER_IMAGE_CATEGORIES,
+  WALLPAPER_FACES_EMOJIS,
+  searchWallpaperEmojis,
+};
+export type { WallpaperImageCategory, EmojiSearchMatch };
+
+export const buildPatternCss = (colors: string[], dir: WallpaperDirection): string => {
+  if (colors.length === 0) return '#7dd3fc';
+  if (colors.length === 1) return colors[0];
+  const dirMap: Record<WallpaperDirection, string> = {
+    right: 'to right',
+    left: 'to left',
+    up: 'to top',
+    down: 'to bottom',
+    top_right: 'to top right',
+    top_left: 'to top left',
+    bottom_right: 'to bottom right',
+    bottom_left: 'to bottom left',
+  };
+  const cssDir = dirMap[dir] || 'to bottom';
+  const n = colors.length;
+  const stops = colors
+    .map((c, i) => {
+      const start = ((i / n) * 100).toFixed(2);
+      const end = (((i + 1) / n) * 100).toFixed(2);
+      return `${c} ${start}%, ${c} ${end}%`;
+    })
+    .join(', ');
+  return `linear-gradient(${cssDir}, ${stops})`;
+};
+
 export const DollhouseUI: React.FC<DollhouseUIProps> = ({
   perspective,
   onTogglePerspective,
@@ -148,6 +268,8 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
   heldItem,
   canPickupPhone,
   onHandAction,
+  isFlashlightOn = false,
+  onToggleFlashlight,
 }) => {
   const [showInventory, setShowInventory] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -161,11 +283,123 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
   const [isPhoneScreenOpen, setIsPhoneScreenOpen] = useState<boolean>(false);
   const [isPhoneUnlocked, setIsPhoneUnlocked] = useState<boolean>(false);
   const [phoneTouchStartY, setPhoneTouchStartY] = useState<number | null>(null);
-  const [phoneAppView, setPhoneAppView] = useState<'home' | 'settings_main' | 'settings_time_mode' | 'settings_real_time_countries'>('home');
+  const [phoneAppView, setPhoneAppView] = useState<PhoneAppView>('home');
   const [mobileTimeMode, setMobileTimeMode] = useState<'game' | 'real'>('game');
   const [selectedRealCountry, setSelectedRealCountry] = useState<'usa' | 'uk' | 'pakistan'>('usa');
   const [realTimeTick, setRealTimeTick] = useState<number>(Date.now());
   const [phoneFeedbackMsg, setPhoneFeedbackMsg] = useState<string | null>(null);
+
+  // Phone Wallpaper States
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [phoneWallpaper, setPhoneWallpaper] = useState<PhoneWallpaper>({
+    type: 'default',
+    value: '#7dd3fc',
+  });
+  const [stagedWallpaper, setStagedWallpaper] = useState<PhoneWallpaper>({
+    type: 'default',
+    value: '#7dd3fc',
+  });
+  const [wallpaperTargetCount, setWallpaperTargetCount] = useState<number>(1);
+  const [wallpaperDirection, setWallpaperDirection] = useState<WallpaperDirection>('down');
+  const [stagedColors, setStagedColors] = useState<string[]>(['#7dd3fc']);
+  const [selectedEmojiCategoryId, setSelectedEmojiCategoryId] = useState<string>('emotions');
+  const [emojiSearchQuery, setEmojiSearchQuery] = useState<string>('');
+
+  // Wallpaper Emoji Placement Editor States (max 15 emojis, position x/y, zoom/scale)
+  const [editorActiveEmoji, setEditorActiveEmoji] = useState<string>('😎');
+  const [editorEmojiX, setEditorEmojiX] = useState<number>(50); // percentage (50% = center)
+  const [editorEmojiY, setEditorEmojiY] = useState<number>(50); // percentage (50% = center)
+  const [editorEmojiScale, setEditorEmojiScale] = useState<number>(1.0); // 0.35 to 3.5
+  const [editorModalOpen, setEditorModalOpen] = useState<boolean>(false);
+
+  const editorCanvasRef = useRef<HTMLDivElement | null>(null);
+  const isDraggingEmojiRef = useRef<boolean>(false);
+  const dragStartPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const dragStartEmojiPosRef = useRef<{ x: number; y: number } | null>(null);
+  const pinchStartDistRef = useRef<number | null>(null);
+  const pinchStartScaleRef = useRef<number>(1.0);
+
+  const handleEditorPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    isDraggingEmojiRef.current = true;
+    dragStartPointerRef.current = { x: e.clientX, y: e.clientY };
+    dragStartEmojiPosRef.current = { x: editorEmojiX, y: editorEmojiY };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleEditorPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingEmojiRef.current || !dragStartPointerRef.current || !dragStartEmojiPosRef.current) return;
+    const canvas = editorCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const deltaX = e.clientX - dragStartPointerRef.current.x;
+    const deltaY = e.clientY - dragStartPointerRef.current.y;
+    const deltaXPercent = (deltaX / rect.width) * 100;
+    const deltaYPercent = (deltaY / rect.height) * 100;
+    const newX = Math.max(5, Math.min(95, dragStartEmojiPosRef.current.x + deltaXPercent));
+    const newY = Math.max(8, Math.min(92, dragStartEmojiPosRef.current.y + deltaYPercent));
+    setEditorEmojiX(newX);
+    setEditorEmojiY(newY);
+  };
+
+  const handleEditorPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    isDraggingEmojiRef.current = false;
+    dragStartPointerRef.current = null;
+    dragStartEmojiPosRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleEditorTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      pinchStartDistRef.current = dist;
+      pinchStartScaleRef.current = editorEmojiScale;
+    }
+  };
+
+  const handleEditorTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2 && pinchStartDistRef.current) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const factor = dist / pinchStartDistRef.current;
+      const newScale = Math.max(0.35, Math.min(3.5, pinchStartScaleRef.current * factor));
+      setEditorEmojiScale(newScale);
+    }
+  };
+
+  const handleEditorTouchEnd = () => {
+    pinchStartDistRef.current = null;
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) {
+        const wp: PhoneWallpaper = { type: 'image', value: dataUrl };
+        setPhoneWallpaper(wp);
+        setStagedWallpaper(wp);
+        setPhoneFeedbackMsg("Wallpaper Uploaded & Applied!");
+        setTimeout(() => setPhoneFeedbackMsg(null), 2500);
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
 
   // Live real time updater for country clocks in mobile phone
   useEffect(() => {
@@ -2016,6 +2250,7 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
           onClick={() => {
             setIsPhoneScreenOpen(true);
             setIsPhoneUnlocked(false);
+            onToggleFlashlight?.(false);
           }}
           className="absolute z-30 pointer-events-auto select-none flex flex-col items-center cursor-pointer group active:scale-95 transition-all"
           style={{ bottom: '144px', left: '46px' }}
@@ -2023,6 +2258,13 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
         >
           {/* Modern Flagship Smartphone in Off-State */}
           <div className="relative w-[68px] h-[124px] bg-slate-950 rounded-[20px] p-[2.5px] border-2 border-slate-500/80 shadow-[0_8px_30px_rgba(0,0,0,0.9),0_0_15px_rgba(56,189,248,0.3)] flex flex-col justify-between overflow-hidden group-hover:border-sky-400/90 group-hover:shadow-[0_8px_30px_rgba(0,0,0,0.9),0_0_20px_rgba(56,189,248,0.6)] transition-all">
+            {/* Flashlight Active Glow Indicator on Phone */}
+            {isFlashlightOn && (
+              <div className="absolute top-1 right-1 w-3.5 h-3.5 rounded-full bg-amber-400 text-black text-[9px] font-extrabold flex items-center justify-center shadow-[0_0_12px_rgba(251,191,36,0.95)] z-20 animate-pulse">
+                🔦
+              </div>
+            )}
+
             {/* Screen Glass Surface (Deep Off-Black with Subtle Glare) */}
             <div className="relative w-full h-full bg-gradient-to-b from-[#090d16] via-[#04060a] to-[#0a0f1d] rounded-[17px] flex flex-col justify-between items-center py-2 px-1">
               {/* Top Dynamic Island / Camera Notch */}
@@ -2050,8 +2292,8 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
 
           {/* Status Label Tag with Click Prompt */}
           <div className="mt-1 px-2.5 py-0.5 rounded-full bg-slate-900/90 border border-slate-700/80 text-[10px] font-bold text-slate-300 shadow-md group-hover:border-sky-400 group-hover:text-sky-300 transition-colors flex items-center gap-1">
-            <span>📱</span>
-            <span>Click to Open</span>
+            <span>{isFlashlightOn ? '🔦' : '📱'}</span>
+            <span>{isFlashlightOn ? 'Torch On (Tap)' : 'Click to Open'}</span>
           </div>
         </div>
       )}
@@ -2089,16 +2331,60 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
             <div
               className={`relative w-full h-full rounded-[38px] overflow-hidden flex flex-col justify-between transition-colors duration-300 ${
                 isPhoneUnlocked
-                  ? phoneAppView !== 'home'
+                  ? phoneAppView !== 'home' && phoneAppView !== 'settings_wallpaper_emoji_editor'
                     ? 'bg-white'
-                    : 'bg-[#7dd3fc]'
-                  : 'bg-gradient-to-b from-slate-900 via-slate-950 to-zinc-950'
+                    : ''
+                  : !phoneWallpaper || phoneWallpaper.type === 'default'
+                  ? 'bg-gradient-to-b from-slate-900 via-slate-950 to-zinc-950'
+                  : ''
               }`}
+              style={
+                isPhoneUnlocked && (phoneAppView === 'home' || phoneAppView === 'settings_wallpaper_emoji_editor')
+                  ? (() => {
+                      const activeWp = phoneAppView === 'settings_wallpaper_emoji_editor' ? stagedWallpaper : phoneWallpaper;
+                      return activeWp.type === 'image'
+                        ? {
+                            backgroundImage: `url(${activeWp.value})`,
+                            backgroundSize: 'cover',
+                            backgroundPosition: 'center',
+                            backgroundRepeat: 'no-repeat',
+                          }
+                        : activeWp.type === 'pattern'
+                        ? {
+                            backgroundImage: activeWp.value,
+                          }
+                        : activeWp.type === 'color'
+                        ? {
+                            backgroundColor: activeWp.value,
+                          }
+                        : {
+                            backgroundColor: '#7dd3fc',
+                          };
+                    })()
+                  : !isPhoneUnlocked && phoneWallpaper.type !== 'default'
+                  ? phoneWallpaper.type === 'image'
+                    ? {
+                        backgroundImage: `linear-gradient(rgba(15, 23, 42, 0.5), rgba(9, 9, 11, 0.7)), url(${phoneWallpaper.value})`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                        backgroundRepeat: 'no-repeat',
+                      }
+                    : phoneWallpaper.type === 'pattern'
+                    ? {
+                        backgroundImage: phoneWallpaper.value,
+                      }
+                    : {
+                        backgroundColor: phoneWallpaper.value,
+                      }
+                  : undefined
+              }
               onTouchStart={(e) => {
-                setPhoneTouchStartY(e.touches[0].clientY);
+                if (!isPhoneUnlocked) {
+                  setPhoneTouchStartY(e.touches[0].clientY);
+                }
               }}
               onTouchEnd={(e) => {
-                if (phoneTouchStartY !== null && !isPhoneUnlocked) {
+                if (!isPhoneUnlocked && phoneTouchStartY !== null) {
                   const endY = e.changedTouches[0].clientY;
                   if (phoneTouchStartY - endY > 40) {
                     setIsPhoneUnlocked(true);
@@ -2107,10 +2393,12 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
                 setPhoneTouchStartY(null);
               }}
               onMouseDown={(e) => {
-                setPhoneTouchStartY(e.clientY);
+                if (!isPhoneUnlocked) {
+                  setPhoneTouchStartY(e.clientY);
+                }
               }}
               onMouseUp={(e) => {
-                if (phoneTouchStartY !== null && !isPhoneUnlocked) {
+                if (!isPhoneUnlocked && phoneTouchStartY !== null) {
                   if (phoneTouchStartY - e.clientY > 40) {
                     setIsPhoneUnlocked(true);
                   }
@@ -2118,6 +2406,15 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
                 setPhoneTouchStartY(null);
               }}
             >
+              {/* Hidden File Input for Wallpaper Upload */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleImageUpload}
+              />
+
               {/* Floating Feedback Banner Inside Phone */}
               {phoneFeedbackMsg && (
                 <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-black text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-2xl flex items-center gap-2 animate-bounce">
@@ -2232,6 +2529,15 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
                     )}
                   </div>
 
+                  {/* Wallpaper Center Big Emoji on Lockscreen */}
+                  {phoneWallpaper.overlayEmoji && (
+                    <div className="flex-1 flex items-center justify-center my-2 pointer-events-none select-none">
+                      <span className="text-7xl sm:text-8xl filter drop-shadow-2xl opacity-90 animate-fade-in">
+                        {phoneWallpaper.overlayEmoji}
+                      </span>
+                    </div>
+                  )}
+
                   {/* Swipe Up Button & Gesture Handle */}
                   <div className="w-full flex flex-col items-center gap-3 mb-2">
                     <button
@@ -2257,12 +2563,39 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
                 </div>
               ) : (
                 /* STATE 2: Unlocked Screen */
-                <div className="flex-1 flex flex-col justify-between">
+                <div className="flex-1 min-h-0 flex flex-col justify-between overflow-hidden">
                   {/* VIEW 1: Homescreen (Light Blue Wallpaper with Power Off and Settings App) */}
                   {phoneAppView === 'home' && (
-                    <div className="flex-1 flex flex-col justify-between p-4">
-                      {/* Upper-Left Corner App Grid */}
-                      <div className="flex items-start justify-start pt-3 pl-2 gap-4">
+                    <div className="relative flex-1 min-h-0 flex flex-col justify-between p-4 overflow-hidden">
+                      {/* Wallpaper Placed Emojis Layer (Underneath apps, on top of wallpaper background) */}
+                      <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+                        {phoneWallpaper.placedEmojis && phoneWallpaper.placedEmojis.length > 0 ? (
+                          phoneWallpaper.placedEmojis.map((item) => (
+                            <div
+                              key={item.id}
+                              className="absolute select-none filter drop-shadow-xl flex items-center justify-center pointer-events-none"
+                              style={{
+                                left: `${item.x}%`,
+                                top: `${item.y}%`,
+                                transform: 'translate(-50%, -50%)',
+                                fontSize: `${Math.round(80 * item.scale)}px`,
+                                lineHeight: 1,
+                              }}
+                            >
+                              {item.emoji}
+                            </div>
+                          ))
+                        ) : phoneWallpaper.overlayEmoji ? (
+                          <div className="w-full h-full flex items-center justify-center pointer-events-none select-none">
+                            <span className="text-8xl sm:text-9xl filter drop-shadow-2xl transform transition-transform animate-fade-in">
+                              {phoneWallpaper.overlayEmoji}
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {/* Upper-Left Corner App Grid (Relative z-10 on top of placed emojis) */}
+                      <div className="relative z-10 flex items-start justify-start pt-3 pl-2 gap-4">
                         {/* 1. Square Shape "Power Off" App with 🛑 Icon */}
                         <button
                           onClick={() => {
@@ -2298,16 +2631,37 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
                             Settings
                           </span>
                         </button>
+
+                        {/* 3. Square Shape "Flashlight" App with 🔦 Icon (⚙️ settings ke barabar mein) */}
+                        <button
+                          onClick={() => {
+                            setIsPhoneScreenOpen(false);
+                            setIsPhoneUnlocked(false);
+                            setPhoneAppView('home');
+                            onToggleFlashlight?.(true);
+                          }}
+                          className="flex flex-col items-center gap-1.5 group cursor-pointer active:scale-90 transition-transform"
+                          title="Turn On Flashlight"
+                        >
+                          <div className="w-16 h-16 rounded-2xl bg-white/95 hover:bg-white border-2 border-white/80 shadow-[0_8px_20px_rgba(0,0,0,0.15)] flex items-center justify-center transition-all group-hover:shadow-[0_10px_25px_rgba(234,179,8,0.5)] group-hover:border-amber-400">
+                            <span className="text-3xl select-none group-hover:scale-110 transition-transform">
+                              🔦
+                            </span>
+                          </div>
+                          <span className="text-xs font-bold text-slate-800 tracking-tight select-none drop-shadow-sm">
+                            Flashlight
+                          </span>
+                        </button>
                       </div>
 
-                      {/* Empty Screen Space */}
+                      {/* Spacer */}
                       <div className="flex-1" />
                     </div>
                   )}
 
                   {/* VIEW 2: Settings Main Screen (Fully White with "Set time & date" row button) */}
                   {phoneAppView === 'settings_main' && (
-                    <div className="flex-1 flex flex-col p-4 bg-white text-black">
+                    <div className="flex-1 min-h-0 flex flex-col p-4 bg-white text-black overflow-y-auto">
                       {/* Top Header Bar with Back Button */}
                       <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                         <button
@@ -2346,13 +2700,36 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
                             <span className="text-base font-bold">›</span>
                           </div>
                         </button>
+
+                        {/* Row Button: "Set Wallpaper" (bilkul wesa hi button: outline black, background transparent) */}
+                        <button
+                          onClick={() => setPhoneAppView('settings_wallpaper_main')}
+                          className="w-full py-3.5 px-4 rounded-xl border-2 border-black bg-transparent hover:bg-black/5 active:scale-[0.99] text-left flex items-center justify-between text-black font-semibold text-sm sm:text-base cursor-pointer shadow-sm transition-all"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-lg">🖼️</span>
+                            <span>Set Wallpaper</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
+                            <span className="capitalize">
+                              {phoneWallpaper.type === 'image'
+                                ? 'Uploaded Image'
+                                : phoneWallpaper.type === 'pattern'
+                                ? `${phoneWallpaper.colors?.length ?? 0} Colors Pattern`
+                                : phoneWallpaper.type === 'color'
+                                ? 'Single Color'
+                                : 'Default (Light Blue)'}
+                            </span>
+                            <span className="text-base font-bold">›</span>
+                          </div>
+                        </button>
                       </div>
                     </div>
                   )}
 
                   {/* VIEW 3: Time & Date Options Screen (2 Options: "Set real time & date" and "Set game time") */}
                   {phoneAppView === 'settings_time_mode' && (
-                    <div className="flex-1 flex flex-col p-4 bg-white text-black">
+                    <div className="flex-1 min-h-0 flex flex-col p-4 bg-white text-black overflow-y-auto">
                       {/* Top Header Bar with Back Button */}
                       <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                         <button
@@ -2429,7 +2806,7 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
 
                   {/* VIEW 4: Real Time 3 Countries Screen (USA, UK, Pakistan) */}
                   {phoneAppView === 'settings_real_time_countries' && (
-                    <div className="flex-1 flex flex-col p-4 bg-white text-black">
+                    <div className="flex-1 min-h-0 flex flex-col p-4 bg-white text-black overflow-y-auto">
                       {/* Top Header Bar with Back Button */}
                       <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                         <button
@@ -2548,6 +2925,1171 @@ export const DollhouseUI: React.FC<DollhouseUIProps> = ({
                       </div>
                     </div>
                   )}
+
+                  {/* VIEW 5: Wallpaper Main Screen (2 Options: "Upload Image" and "Create Image") */}
+                  {phoneAppView === 'settings_wallpaper_main' && (
+                    <div className="flex-1 min-h-0 flex flex-col p-4 bg-white text-black overflow-y-auto">
+                      {/* Top Header Bar with Back Button */}
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                        <button
+                          onClick={() => setPhoneAppView('settings_main')}
+                          className="px-2 py-1 rounded-lg hover:bg-slate-100 text-black font-bold text-xs sm:text-sm flex items-center gap-1 cursor-pointer transition active:scale-95"
+                          title="Back to Settings"
+                        >
+                          <span>◀</span>
+                          <span>Settings</span>
+                        </button>
+                        <h2 className="text-base font-bold text-black tracking-tight">Set Wallpaper</h2>
+                        <div className="w-16" />
+                      </div>
+
+                      {/* 2 Big Buttons Content */}
+                      <div className="flex-1 flex flex-col pt-5 gap-3.5">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">
+                          Wallpaper Options
+                        </span>
+
+                        {/* Button 1: "Upload Image" */}
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="w-full py-4 px-4 rounded-xl border-2 border-slate-300 hover:border-black bg-transparent hover:bg-black/5 active:scale-[0.99] text-left flex items-center justify-between text-black font-semibold text-sm sm:text-base cursor-pointer shadow-sm transition-all"
+                        >
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-xl">📁</span>
+                              <span className="font-bold">Upload Image</span>
+                            </div>
+                            <span className="text-[11px] text-slate-500 font-normal pl-8">
+                              Upload photo from personal device files
+                            </span>
+                          </div>
+                          <span className="text-base font-bold text-slate-400">›</span>
+                        </button>
+
+                        {/* Button 2: "Create Image" */}
+                        <button
+                          onClick={() => setPhoneAppView('settings_wallpaper_create')}
+                          className="w-full py-4 px-4 rounded-xl border-2 border-slate-300 hover:border-black bg-transparent hover:bg-black/5 active:scale-[0.99] text-left flex items-center justify-between text-black font-semibold text-sm sm:text-base cursor-pointer shadow-sm transition-all"
+                        >
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-xl">🎨</span>
+                              <span className="font-bold">Create Image</span>
+                            </div>
+                            <span className="text-[11px] text-slate-500 font-normal pl-8">
+                              Background color patterns & designs
+                            </span>
+                          </div>
+                          <span className="text-base font-bold text-slate-400">›</span>
+                        </button>
+
+                        {/* Active Wallpaper Status Preview Card */}
+                        <div className="mt-4 p-3.5 rounded-2xl border border-slate-200 bg-slate-50 flex items-center gap-3">
+                          <div
+                            className="w-12 h-16 rounded-lg border border-slate-300 shadow-sm overflow-hidden flex-shrink-0"
+                            style={
+                              phoneWallpaper.type === 'image'
+                                ? { backgroundImage: `url(${phoneWallpaper.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                                : phoneWallpaper.type === 'pattern'
+                                ? { backgroundImage: phoneWallpaper.value }
+                                : phoneWallpaper.type === 'color'
+                                ? { backgroundColor: phoneWallpaper.value }
+                                : { backgroundColor: '#7dd3fc' }
+                            }
+                          />
+                          <div className="flex flex-col text-xs">
+                            <span className="font-bold text-slate-800">Current Mobile Wallpaper</span>
+                            <span className="text-slate-500 text-[11px] capitalize">
+                              {phoneWallpaper.type === 'image'
+                                ? 'Uploaded Image'
+                                : phoneWallpaper.type === 'pattern'
+                                ? `${phoneWallpaper.colors?.length ?? 0} Colors Pattern`
+                                : phoneWallpaper.type === 'color'
+                                ? 'Single Color'
+                                : 'Default (Light Blue)'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* VIEW 6: Create Image Screen (2 Buttons: "Background" & "Image", Bottom-right Apply button) */}
+                  {phoneAppView === 'settings_wallpaper_create' && (
+                    <div className="flex-1 min-h-0 flex flex-col p-4 bg-white text-black justify-between overflow-y-auto">
+                      {/* Top Content Area */}
+                      <div>
+                        {/* Top Header Bar with Back Button */}
+                        <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                          <button
+                            onClick={() => setPhoneAppView('settings_wallpaper_main')}
+                            className="px-2 py-1 rounded-lg hover:bg-slate-100 text-black font-bold text-xs sm:text-sm flex items-center gap-1 cursor-pointer transition active:scale-95"
+                            title="Back"
+                          >
+                            <span>◀</span>
+                            <span>Back</span>
+                          </button>
+                          <h2 className="text-base font-bold text-black tracking-tight">Create Image</h2>
+                          <div className="w-12" />
+                        </div>
+
+                        {/* 2 Buttons */}
+                        <div className="flex flex-col pt-5 gap-3.5">
+                          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">
+                            Design Elements
+                          </span>
+
+                          {/* Button 1: Background */}
+                          <button
+                            onClick={() => setPhoneAppView('settings_wallpaper_count')}
+                            className="w-full py-4 px-4 rounded-xl border-2 border-slate-300 hover:border-black bg-transparent hover:bg-black/5 active:scale-[0.99] text-left flex items-center justify-between text-black font-semibold text-sm sm:text-base cursor-pointer shadow-sm transition-all"
+                          >
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-2.5">
+                                <span className="text-xl">🎨</span>
+                                <span className="font-bold">Background</span>
+                              </div>
+                              <span className="text-[11px] text-slate-500 font-normal pl-8">
+                                Select 1-7 colors and pattern direction
+                              </span>
+                            </div>
+                            <span className="text-base font-bold text-slate-400">›</span>
+                          </button>
+
+                          {/* Button 2: Image (Navigates to Categories) */}
+                          <button
+                            onClick={() => setPhoneAppView('settings_wallpaper_image_categories')}
+                            className="w-full py-4 px-4 rounded-xl border-2 border-slate-300 hover:border-black bg-transparent hover:bg-black/5 active:scale-[0.99] text-left flex items-center justify-between text-black font-semibold text-sm sm:text-base cursor-pointer shadow-sm transition-all"
+                          >
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-2.5">
+                                <span className="text-xl">🖼️</span>
+                                <span className="font-bold">Image</span>
+                              </div>
+                              <span className="text-[11px] text-slate-500 font-normal pl-8">
+                                {stagedWallpaper.overlayEmoji
+                                  ? `Selected: ${stagedWallpaper.overlayEmoji} (Tap to change)`
+                                  : 'Faces, Characters, Animals & Categories'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              {stagedWallpaper.overlayEmoji && (
+                                <span className="text-xl bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-300 shadow-xs">
+                                  {stagedWallpaper.overlayEmoji}
+                                </span>
+                              )}
+                              <span className="text-base font-bold text-slate-400">›</span>
+                            </div>
+                          </button>
+
+                          {/* Live Staged Wallpaper Preview */}
+                          <div className="mt-3 p-3 rounded-2xl border border-slate-200 bg-slate-50 flex items-center gap-3">
+                            <div
+                              className="w-14 h-20 rounded-xl border-2 border-slate-300 shadow-md flex-shrink-0 flex items-center justify-center overflow-hidden"
+                              style={
+                                stagedWallpaper.type === 'image'
+                                  ? { backgroundImage: `url(${stagedWallpaper.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                                  : stagedWallpaper.type === 'pattern'
+                                  ? { backgroundImage: stagedWallpaper.value }
+                                  : stagedWallpaper.type === 'color'
+                                  ? { backgroundColor: stagedWallpaper.value }
+                                  : { backgroundColor: '#7dd3fc' }
+                              }
+                            >
+                              {stagedWallpaper.overlayEmoji && (
+                                <span className="text-2xl filter drop-shadow select-none">
+                                  {stagedWallpaper.overlayEmoji}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-col text-xs gap-1">
+                              <span className="font-bold text-black">Staged Wallpaper Preview</span>
+                              <span className="text-slate-500 text-[11px]">
+                                {stagedWallpaper.type === 'pattern'
+                                  ? `${stagedWallpaper.colors?.length ?? 0} Colors • Direction: ${
+                                      WALLPAPER_DIRECTIONS.find((d) => d.key === wallpaperDirection)?.label ?? wallpaperDirection
+                                    }`
+                                  : stagedWallpaper.type === 'color'
+                                  ? '1 Color Custom Background'
+                                  : stagedWallpaper.type === 'image'
+                                  ? 'Custom Uploaded Photo'
+                                  : 'Default Normal Background'}
+                                {stagedWallpaper.overlayEmoji ? ` • Image: ${stagedWallpaper.overlayEmoji}` : ''}
+                              </span>
+                              <span className="text-[10px] text-emerald-700 font-semibold">
+                                Click &quot;Apply&quot; below to set on phone
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Bottom Right Corner: Apply Button */}
+                      <div className="w-full flex items-center justify-between pt-4 pb-1">
+                        {stagedWallpaper.placedEmojis && stagedWallpaper.placedEmojis.length > 0 ? (
+                          <button
+                            onClick={() => {
+                              setStagedWallpaper((prev) => ({ ...prev, placedEmojis: [] }));
+                              setPhoneWallpaper((prev) => ({ ...prev, placedEmojis: [] }));
+                              setPhoneFeedbackMsg("Cleared all emojis!");
+                              setTimeout(() => setPhoneFeedbackMsg(null), 2000);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg border border-rose-300 text-rose-600 hover:bg-rose-50 text-[11px] font-bold transition active:scale-95 cursor-pointer flex items-center gap-1"
+                            title="Reset all emojis on wallpaper"
+                          >
+                            <span>🗑️</span>
+                            <span>Reset Emojis</span>
+                          </button>
+                        ) : (
+                          <div />
+                        )}
+
+                        <button
+                          onClick={() => {
+                            if (stagedWallpaper.overlayEmoji) {
+                              setEditorActiveEmoji(stagedWallpaper.overlayEmoji);
+                              setEditorEmojiX(50);
+                              setEditorEmojiY(50);
+                              setEditorEmojiScale(1.0);
+                              setEditorModalOpen(false);
+                              setPhoneAppView('settings_wallpaper_emoji_editor');
+                            } else {
+                              setPhoneWallpaper(stagedWallpaper);
+                              setPhoneFeedbackMsg("Wallpaper Applied!");
+                              setTimeout(() => setPhoneFeedbackMsg(null), 2500);
+                            }
+                          }}
+                          className="px-6 py-2.5 rounded-xl bg-black hover:bg-slate-800 text-white font-bold text-sm shadow-lg flex items-center gap-2 cursor-pointer active:scale-95 transition-all"
+                        >
+                          <span className="text-emerald-400 font-extrabold text-base">✓</span>
+                          <span>Apply</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* VIEW 7: Background Colors Count (Buttons 1, 2, 3, 4, 5, 6, 7) */}
+                  {phoneAppView === 'settings_wallpaper_count' && (
+                    <div className="flex-1 min-h-0 flex flex-col p-4 bg-white text-black overflow-hidden">
+                      {/* Top Header Bar with Back Button */}
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-200 flex-shrink-0">
+                        <button
+                          onClick={() => setPhoneAppView('settings_wallpaper_create')}
+                          className="px-2 py-1 rounded-lg hover:bg-slate-100 text-black font-bold text-xs sm:text-sm flex items-center gap-1 cursor-pointer transition active:scale-95"
+                          title="Back"
+                        >
+                          <span>◀</span>
+                          <span>Back</span>
+                        </button>
+                        <h2 className="text-base font-bold text-black tracking-tight">Background</h2>
+                        <div className="w-12" />
+                      </div>
+
+                      {/* 1-7 Buttons List (Each in separate row) */}
+                      <div
+                        className="flex-1 min-h-0 flex flex-col pt-3 gap-2 overflow-y-auto overscroll-contain pr-1 touch-pan-y"
+                        style={{
+                          WebkitOverflowScrolling: 'touch',
+                          touchAction: 'pan-y',
+                          scrollbarWidth: 'thin',
+                        }}
+                      >
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 mb-1">
+                          Choose Number of Colors (1 - 7)
+                        </span>
+
+                        {[1, 2, 3, 4, 5, 6, 7].map((num) => (
+                          <button
+                            key={num}
+                            onClick={() => {
+                              setWallpaperTargetCount(num);
+                              if (num === 1) {
+                                setPhoneAppView('settings_wallpaper_colors');
+                              } else {
+                                setPhoneAppView('settings_wallpaper_direction');
+                              }
+                            }}
+                            className="w-full py-3 px-4 rounded-xl border-2 border-slate-300 hover:border-black bg-transparent hover:bg-black/5 active:scale-[0.99] text-left flex items-center justify-between text-black font-semibold text-sm sm:text-base cursor-pointer shadow-sm transition-all touch-pan-y"
+                            style={{ touchAction: 'pan-y' }}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="w-7 h-7 rounded-lg bg-black text-white font-bold text-sm flex items-center justify-center">
+                                {num}
+                              </span>
+                              <span>{num === 1 ? '1 Color Background' : `${num} Colors Pattern`}</span>
+                            </div>
+                            <span className="text-base font-bold text-slate-400">›</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* VIEW 8: Pattern Direction Options (Right, Left, Up, Down) */}
+                  {phoneAppView === 'settings_wallpaper_direction' && (
+                    <div className="flex-1 min-h-0 flex flex-col p-4 bg-white text-black overflow-y-auto overscroll-contain touch-pan-y"
+                      style={{
+                        WebkitOverflowScrolling: 'touch',
+                        touchAction: 'pan-y',
+                        scrollbarWidth: 'thin',
+                      }}
+                    >
+                      {/* Top Header Bar with Back Button */}
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-200 flex-shrink-0">
+                        <button
+                          onClick={() => setPhoneAppView('settings_wallpaper_count')}
+                          className="px-2 py-1 rounded-lg hover:bg-slate-100 text-black font-bold text-xs sm:text-sm flex items-center gap-1 cursor-pointer transition active:scale-95"
+                          title="Back"
+                        >
+                          <span>◀</span>
+                          <span>Back</span>
+                        </button>
+                        <h2 className="text-base font-bold text-black tracking-tight">Pattern Direction</h2>
+                        <div className="w-12" />
+                      </div>
+
+                      {/* 8 Direction Buttons in Separate Rows */}
+                      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 flex flex-col pt-3 gap-2.5 pb-4 touch-pan-y"
+                        style={{
+                          WebkitOverflowScrolling: 'touch',
+                          touchAction: 'pan-y',
+                          scrollbarWidth: 'thin',
+                        }}
+                      >
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">
+                          Select Pattern Flow ({wallpaperTargetCount} Colors)
+                        </span>
+
+                        {WALLPAPER_DIRECTIONS.map((dir) => (
+                          <button
+                            key={dir.key}
+                            onClick={() => {
+                              setWallpaperDirection(dir.key);
+                              setPhoneAppView('settings_wallpaper_colors');
+                            }}
+                            className={`w-full py-3 px-4 rounded-xl border-2 border-slate-300 hover:border-black bg-transparent hover:bg-black/5 active:scale-[0.99] text-left flex items-center justify-between text-black font-semibold text-sm sm:text-base cursor-pointer shadow-sm transition-all touch-pan-y ${
+                              wallpaperDirection === dir.key ? 'border-black bg-slate-50 ring-1 ring-black' : ''
+                            }`}
+                            style={{ touchAction: 'pan-y' }}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="text-2xl">{dir.icon}</span>
+                              <span>{dir.label}</span>
+                            </div>
+                            <span className="text-base font-bold text-slate-400">›</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Finger Scroll Hint */}
+                      <div className="pt-1 text-center flex-shrink-0 select-none">
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          ↕ Scroll to see all 8 pattern directions
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* VIEW 9: 15 Colors Selection Screen */}
+                  {phoneAppView === 'settings_wallpaper_colors' && (
+                    <div className="flex-1 min-h-0 flex flex-col p-4 bg-white text-black overflow-hidden">
+                      {/* Top Header Bar with Back Button */}
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200 flex-shrink-0">
+                        <button
+                          onClick={() => {
+                            if (wallpaperTargetCount === 1) {
+                              setPhoneAppView('settings_wallpaper_count');
+                            } else {
+                              setPhoneAppView('settings_wallpaper_direction');
+                            }
+                          }}
+                          className="px-2 py-1 rounded-lg hover:bg-slate-100 text-black font-bold text-xs sm:text-sm flex items-center gap-1 cursor-pointer transition active:scale-95"
+                          title="Back"
+                        >
+                          <span>◀</span>
+                          <span>Back</span>
+                        </button>
+                        <h2 className="text-base font-bold text-black tracking-tight">Select Colors</h2>
+                        <button
+                          onClick={() => setPhoneAppView('settings_wallpaper_create')}
+                          className="px-2.5 py-1 rounded-lg bg-black text-white font-bold text-xs flex items-center gap-1 cursor-pointer hover:bg-slate-800 transition active:scale-95 shadow-xs"
+                          title="Proceed to Apply Screen"
+                        >
+                          <span>Apply Screen ➔</span>
+                        </button>
+                      </div>
+
+                      {/* Header Subtext & Slots Info */}
+                      <div className="pt-2 pb-2 flex flex-col gap-2 flex-shrink-0">
+                        {wallpaperTargetCount === 1 ? (
+                          <div className="flex items-center justify-between px-1">
+                            <span className="text-xs font-bold text-slate-600">
+                              Tap 1 color for wallpaper:
+                            </span>
+                            <span className="text-[11px] text-slate-400">
+                              (Light Blue restores default)
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-slate-700">
+                                Pick {wallpaperTargetCount} Colors ({stagedColors.length}/{wallpaperTargetCount}):
+                              </span>
+                              {stagedColors.length > 0 && (
+                                <button
+                                  onClick={() => setStagedColors([])}
+                                  className="text-[11px] text-red-600 font-bold hover:underline cursor-pointer"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Chosen Colors Slots */}
+                            <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+                              {Array.from({ length: wallpaperTargetCount }).map((_, idx) => {
+                                const hex = stagedColors[idx];
+                                const colorObj = hex ? WALLPAPER_COLORS.find((c) => c.hex === hex) : null;
+                                return (
+                                  <div
+                                    key={idx}
+                                    className={`w-7 h-7 rounded-lg border flex items-center justify-center text-xs font-bold flex-shrink-0 shadow-xs ${
+                                      hex ? 'border-black' : 'border-dashed border-slate-300 text-slate-400'
+                                    }`}
+                                    style={hex ? { backgroundColor: hex } : undefined}
+                                    title={colorObj?.name ?? `Slot ${idx + 1}`}
+                                  >
+                                    {hex ? (
+                                      <span className="drop-shadow select-none text-[11px]">{colorObj?.emoji ?? ''}</span>
+                                    ) : (
+                                      idx + 1
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Mini Live Preview Bar */}
+                            {stagedColors.length > 0 && (
+                              <div
+                                className="w-full h-4 rounded-md border border-slate-300 shadow-inner mt-0.5"
+                                style={{
+                                  backgroundImage: buildPatternCss(
+                                    stagedColors.length < wallpaperTargetCount
+                                      ? [...stagedColors, ...Array(wallpaperTargetCount - stagedColors.length).fill(stagedColors[stagedColors.length - 1] || '#7dd3fc')]
+                                      : stagedColors,
+                                    wallpaperDirection
+                                  ),
+                                }}
+                              />
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 15 Color Buttons List (Each in separate row - Smooth Touch Finger Scrollable) */}
+                      <div
+                        className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1.5 flex flex-col gap-2 pt-1 pb-3 touch-pan-y"
+                        style={{
+                          WebkitOverflowScrolling: 'touch',
+                          touchAction: 'pan-y',
+                          scrollbarWidth: 'thin',
+                        }}
+                      >
+                        {WALLPAPER_COLORS.map((item) => {
+                          const isSingleSelected = wallpaperTargetCount === 1 && stagedColors[0] === item.hex;
+                          const multiCount = stagedColors.filter((c) => c === item.hex).length;
+
+                          return (
+                            <button
+                              key={item.name}
+                              onClick={() => {
+                                if (wallpaperTargetCount === 1) {
+                                  setStagedColors([item.hex]);
+                                  if (item.name === 'Light Blue') {
+                                    setStagedWallpaper({ type: 'default', value: '#7dd3fc', overlayEmoji: stagedWallpaper.overlayEmoji });
+                                  } else {
+                                    setStagedWallpaper({ type: 'color', value: item.hex, overlayEmoji: stagedWallpaper.overlayEmoji });
+                                  }
+                                } else {
+                                  let newColors: string[];
+                                  if (stagedColors.length < wallpaperTargetCount) {
+                                    newColors = [...stagedColors, item.hex];
+                                  } else {
+                                    newColors = [...stagedColors.slice(1), item.hex];
+                                  }
+                                  setStagedColors(newColors);
+                                  const patternCss = buildPatternCss(newColors, wallpaperDirection);
+                                  setStagedWallpaper({
+                                    type: 'pattern',
+                                    value: patternCss,
+                                    colors: newColors,
+                                    direction: wallpaperDirection,
+                                    overlayEmoji: stagedWallpaper.overlayEmoji,
+                                  });
+                                }
+                              }}
+                              className={`w-full py-2.5 px-3 rounded-xl border-2 text-left flex items-center justify-between cursor-pointer transition-all active:scale-[0.99] touch-pan-y ${
+                                isSingleSelected || multiCount > 0
+                                  ? 'border-black bg-slate-100 shadow-sm'
+                                  : 'border-slate-200 hover:border-slate-400 bg-white'
+                              }`}
+                              style={{ touchAction: 'pan-y' }}
+                            >
+                              <div className="flex items-center gap-3">
+                                <span className="text-xl select-none">{item.emoji}</span>
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className="w-5 h-5 rounded-md border border-slate-300 shadow-xs"
+                                    style={{ backgroundColor: item.hex }}
+                                  />
+                                  <span className="font-semibold text-black text-sm">{item.name}</span>
+                                  {item.name === 'Light Blue' && (
+                                    <span className="text-[10px] text-sky-700 bg-sky-100 px-1.5 py-0.5 rounded font-bold">
+                                      Normal State
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              {wallpaperTargetCount === 1 && isSingleSelected ? (
+                                <span className="px-2 py-0.5 rounded-full bg-black text-white text-[11px] font-bold">
+                                  ✓ Selected
+                                </span>
+                              ) : wallpaperTargetCount > 1 && multiCount > 0 ? (
+                                <span className="px-2 py-0.5 rounded-full bg-black text-white text-[11px] font-bold">
+                                  ×{multiCount}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-slate-400 font-medium">Pick</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Finger Scroll Cue at bottom */}
+                      <div className="pt-1.5 text-center flex-shrink-0 select-none">
+                        <span className="text-[10px] text-slate-400 font-medium tracking-tight">
+                          ↕ Scroll with finger for all {WALLPAPER_COLORS.length} colors
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* VIEW 10: Image Categories Screen */}
+                  {phoneAppView === 'settings_wallpaper_image_categories' && (
+                    <div className="flex-1 min-h-0 flex flex-col p-4 bg-white text-black overflow-hidden">
+                      {/* Top Header Bar with Back Button */}
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-200 flex-shrink-0">
+                        <button
+                          onClick={() => setPhoneAppView('settings_wallpaper_create')}
+                          className="px-2 py-1 rounded-lg hover:bg-slate-100 text-black font-bold text-xs sm:text-sm flex items-center gap-1 cursor-pointer transition active:scale-95"
+                          title="Back"
+                        >
+                          <span>◀</span>
+                          <span>Back</span>
+                        </button>
+                        <h2 className="text-base font-bold text-black tracking-tight">Image Categories</h2>
+                        <button
+                          onClick={() => setPhoneAppView('settings_wallpaper_create')}
+                          className="px-2 py-1 rounded-lg hover:bg-slate-100 text-slate-600 font-bold text-xs cursor-pointer active:scale-95 transition"
+                          title="Apply Screen"
+                        >
+                          <span>Apply ›</span>
+                        </button>
+                      </div>
+
+                      {/* Search Input Field above emoji categories */}
+                      <div className="pt-2 pb-1.5 flex-shrink-0">
+                        <div className="relative flex items-center">
+                          <span className="absolute left-3 text-slate-400 select-none text-sm pointer-events-none">🔍</span>
+                          <input
+                            type="text"
+                            value={emojiSearchQuery}
+                            onChange={(e) => setEmojiSearchQuery(e.target.value)}
+                            placeholder="Search emojis or categories (e.g. food, heart, cat)..."
+                            className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs sm:text-sm text-black placeholder-slate-400 focus:outline-none focus:border-black focus:bg-white transition shadow-inner"
+                          />
+                          {emojiSearchQuery && (
+                            <button
+                              onClick={() => setEmojiSearchQuery('')}
+                              className="absolute right-2.5 text-slate-400 hover:text-black text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center hover:bg-slate-200 transition cursor-pointer"
+                              title="Clear Search"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {(() => {
+                        const { matchedCategories, matchedEmojis } = searchWallpaperEmojis(emojiSearchQuery);
+                        const isSearching = emojiSearchQuery.trim().length > 0;
+
+                        return (
+                          <>
+                            {/* Subtitle & Current Selection Status */}
+                            <div className="pb-1.5 flex items-center justify-between flex-shrink-0">
+                              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1">
+                                {isSearching
+                                  ? `Found ${matchedCategories.length} Categories • ${matchedEmojis.length} Emojis`
+                                  : 'Select Category'}
+                              </span>
+                              {stagedWallpaper.overlayEmoji && (
+                                <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                                  <span>Active:</span>
+                                  <span className="text-base">{stagedWallpaper.overlayEmoji}</span>
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Scrollable Container for Categories and Search Results */}
+                            <div
+                              className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 flex flex-col gap-2 pt-1 pb-3 touch-pan-y"
+                              style={{
+                                WebkitOverflowScrolling: 'touch',
+                                touchAction: 'pan-y',
+                                scrollbarWidth: 'thin',
+                              }}
+                            >
+                              {/* Direct Emoji Results when Searching */}
+                              {isSearching && matchedEmojis.length > 0 && (
+                                <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200 flex-shrink-0">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                                      <span>✨ Direct Emoji Matches</span>
+                                      <span className="text-[11px] bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded-full font-semibold">
+                                        {matchedEmojis.length}
+                                      </span>
+                                    </span>
+                                    <span className="text-[11px] text-slate-400">Tap to select</span>
+                                  </div>
+
+                                  <div className="grid grid-cols-6 gap-1.5 max-h-36 overflow-y-auto p-1 bg-white rounded-lg border border-slate-200 touch-pan-y">
+                                    {matchedEmojis.map(({ emoji, categoryName }, idx) => {
+                                      const isSelected = stagedWallpaper.overlayEmoji === emoji;
+                                      return (
+                                        <button
+                                          key={`${emoji}-${idx}`}
+                                          onClick={() => {
+                                            setStagedWallpaper((prev) => ({
+                                              ...prev,
+                                              overlayEmoji: emoji,
+                                            }));
+                                            setEditorActiveEmoji(emoji);
+                                          }}
+                                          title={`${emoji} (${categoryName})`}
+                                          className={`h-10 rounded-lg flex items-center justify-center text-xl transition-all cursor-pointer relative active:scale-90 ${
+                                            isSelected
+                                              ? 'border-2 border-emerald-600 bg-emerald-50 ring-2 ring-emerald-400'
+                                              : 'border border-slate-200 hover:border-black hover:bg-slate-50'
+                                          }`}
+                                        >
+                                          <span>{emoji}</span>
+                                          {isSelected && (
+                                            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-600 text-white text-[9px] flex items-center justify-center font-bold">
+                                              ✓
+                                            </span>
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
+                              {isSearching && matchedCategories.length > 0 && (
+                                <span className="text-xs font-bold text-slate-600 px-1 pt-1">
+                                  Matching Categories ({matchedCategories.length})
+                                </span>
+                              )}
+
+                              {matchedCategories.length > 0 ? (
+                                matchedCategories.map((cat) => {
+                                  const hasSelectedInCat =
+                                    stagedWallpaper.overlayEmoji &&
+                                    cat.emojis.includes(stagedWallpaper.overlayEmoji);
+                                  return (
+                                    <button
+                                      key={cat.id}
+                                      onClick={() => {
+                                        setSelectedEmojiCategoryId(cat.id);
+                                        setPhoneAppView('settings_wallpaper_faces');
+                                      }}
+                                      className="w-full py-3 px-3.5 rounded-xl border-2 text-left flex items-center justify-between transition-all touch-pan-y border-slate-200 hover:border-black bg-white hover:bg-slate-50 cursor-pointer shadow-xs active:scale-[0.99]"
+                                      style={{ touchAction: 'pan-y' }}
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        <span className="text-2xl select-none">{cat.icon}</span>
+                                        <div className="flex flex-col">
+                                          <span className="font-bold text-sm text-black">{cat.name}</span>
+                                          <span className="text-[11px] text-slate-400 font-normal">
+                                            {cat.emojis.length} Emojis
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        {hasSelectedInCat && (
+                                          <span className="text-base bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-300 font-medium">
+                                            {stagedWallpaper.overlayEmoji}
+                                          </span>
+                                        )}
+                                        <span className="text-base font-bold text-slate-400">›</span>
+                                      </div>
+                                    </button>
+                                  );
+                                })
+                              ) : (
+                                <div className="p-6 text-center flex flex-col items-center justify-center gap-2 bg-slate-50 rounded-xl border border-dashed border-slate-300 my-4">
+                                  <span className="text-3xl">🔍</span>
+                                  <span className="text-sm font-bold text-slate-700">No categories or emojis found</span>
+                                  <span className="text-xs text-slate-500">
+                                    No results for &quot;{emojiSearchQuery}&quot;. Try quick categories:
+                                  </span>
+                                  <div className="flex flex-wrap gap-1.5 justify-center pt-2">
+                                    {['Emotions', 'Animals', 'Food', 'Sky', 'Hearts', 'Music', 'Transport', 'Flags'].map((sug) => (
+                                      <button
+                                        key={sug}
+                                        onClick={() => setEmojiSearchQuery(sug)}
+                                        className="px-2 py-1 text-xs bg-white border border-slate-300 rounded-lg hover:border-black text-slate-700 font-medium cursor-pointer"
+                                      >
+                                        {sug}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Finger Scroll Hint */}
+                            <div className="pt-1.5 text-center flex-shrink-0 select-none">
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                ↕ Scroll with finger to see {isSearching ? 'filtered results' : `all ${WALLPAPER_IMAGE_CATEGORIES.length} categories`}
+                              </span>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {/* VIEW 11: Category Emoji Selection Screen */}
+                  {phoneAppView === 'settings_wallpaper_faces' && (() => {
+                    const currentCategory =
+                      WALLPAPER_IMAGE_CATEGORIES.find((c) => c.id === selectedEmojiCategoryId) ||
+                      WALLPAPER_IMAGE_CATEGORIES[0];
+                    return (
+                      <div className="flex-1 min-h-0 flex flex-col p-4 bg-white text-black overflow-hidden">
+                        {/* Top Header Bar with Back Button and Quick Done */}
+                        <div className="flex items-center justify-between pb-2.5 border-b border-slate-200 flex-shrink-0">
+                          <button
+                            onClick={() => setPhoneAppView('settings_wallpaper_image_categories')}
+                            className="px-2 py-1 rounded-lg hover:bg-slate-100 text-black font-bold text-xs sm:text-sm flex items-center gap-1 cursor-pointer transition active:scale-95"
+                            title="Back to Categories"
+                          >
+                            <span>◀</span>
+                            <span>Categories</span>
+                          </button>
+                          <h2 className="text-base font-bold text-black tracking-tight">{currentCategory.name}</h2>
+                          <button
+                            onClick={() => setPhoneAppView('settings_wallpaper_create')}
+                            className="px-3 py-1 rounded-lg bg-black hover:bg-slate-800 text-white font-bold text-xs cursor-pointer active:scale-95 transition shadow-sm flex items-center gap-1"
+                            title="Done & Go to Apply Screen"
+                          >
+                            <span>Done</span>
+                            <span>›</span>
+                          </button>
+                        </div>
+
+                        {/* Selected Emoji Preview & Remove Button */}
+                        <div className="py-2 px-1 flex items-center justify-between flex-shrink-0 bg-slate-50/80 rounded-xl my-1.5 border border-slate-200">
+                          <div className="flex items-center gap-2 pl-2">
+                            <span className="text-xs font-bold text-slate-600">Selected Emoji:</span>
+                            {stagedWallpaper.overlayEmoji ? (
+                              <span className="text-2xl bg-white px-2.5 py-0.5 rounded-lg border border-slate-300 shadow-sm animate-scale-up select-none">
+                                {stagedWallpaper.overlayEmoji}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-400 italic">None selected yet</span>
+                            )}
+                          </div>
+                          {stagedWallpaper.overlayEmoji && (
+                            <button
+                              onClick={() => {
+                                setStagedWallpaper((prev) => ({ ...prev, overlayEmoji: null }));
+                              }}
+                              className="mr-2 px-2 py-1 rounded-md text-[11px] font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 cursor-pointer active:scale-95 transition"
+                            >
+                              ✕ Remove
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Subheading Instructions */}
+                        <div className="pb-1 px-1 flex items-center justify-between flex-shrink-0">
+                          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                            Tap any emoji to set on wallpaper
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {currentCategory.emojis.length} Emojis
+                          </span>
+                        </div>
+
+                        {/* Smooth Finger-Scrollable Grid of Category Emojis (6 columns) */}
+                        <div
+                          className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 pt-1 pb-3 touch-pan-y"
+                          style={{
+                            WebkitOverflowScrolling: 'touch',
+                            touchAction: 'pan-y',
+                            scrollbarWidth: 'thin',
+                          }}
+                        >
+                          <div className="grid grid-cols-6 gap-2">
+                            {currentCategory.emojis.map((emoji, idx) => {
+                              const isSelected = stagedWallpaper.overlayEmoji === emoji;
+                              return (
+                                <button
+                                  key={`${emoji}-${idx}`}
+                                  onClick={() => {
+                                    setStagedWallpaper((prev) => ({
+                                      ...prev,
+                                      overlayEmoji: emoji,
+                                    }));
+                                    setEditorActiveEmoji(emoji);
+                                  }}
+                                  className={`w-full aspect-square rounded-xl flex items-center justify-center text-2xl sm:text-3xl transition-all cursor-pointer select-none active:scale-90 hover:scale-105 touch-pan-y ${
+                                    isSelected
+                                      ? 'bg-slate-900 ring-2 ring-emerald-500 shadow-lg scale-105'
+                                      : 'bg-slate-50 hover:bg-slate-100 border border-slate-200'
+                                  }`}
+                                  style={{ touchAction: 'pan-y' }}
+                                  title={emoji}
+                                >
+                                  <span className="transform active:scale-125 transition-transform">{emoji}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Bottom Footer Bar with Action to Apply Screen */}
+                        <div className="pt-2 pb-0.5 border-t border-slate-200 flex items-center justify-between flex-shrink-0">
+                          <span className="text-[10px] text-slate-400 font-medium select-none">
+                            ↕ Scroll with finger for more {currentCategory.name.toLowerCase()} emojis
+                          </span>
+                          <button
+                            onClick={() => setPhoneAppView('settings_wallpaper_create')}
+                            className="px-4 py-1.5 rounded-xl bg-black hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
+                          >
+                            <span>Go to Apply Screen</span>
+                            <span>›</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* VIEW 12: Interactive Wallpaper Emoji Placement Editor Screen */}
+                  {phoneAppView === 'settings_wallpaper_emoji_editor' && (() => {
+                    const placedList = stagedWallpaper.placedEmojis || [];
+                    const currentCount = placedList.length;
+
+                    const handleSetEmoji = () => {
+                      if (currentCount >= 15) {
+                        setPhoneFeedbackMsg("Maximum 15 emojis reached!");
+                        setTimeout(() => setPhoneFeedbackMsg(null), 2500);
+                        return;
+                      }
+
+                      const newPlaced: WallpaperPlacedEmoji = {
+                        id: `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                        emoji: editorActiveEmoji,
+                        x: Math.round(editorEmojiX * 10) / 10,
+                        y: Math.round(editorEmojiY * 10) / 10,
+                        scale: Math.round(editorEmojiScale * 100) / 100,
+                      };
+
+                      const updatedList = [...placedList, newPlaced];
+                      const newWp: PhoneWallpaper = {
+                        ...stagedWallpaper,
+                        placedEmojis: updatedList,
+                        overlayEmoji: null,
+                      };
+
+                      setStagedWallpaper(newWp);
+                      setPhoneWallpaper(newWp);
+                      setEditorModalOpen(true);
+                    };
+
+                    const handleClearAllEmojis = () => {
+                      const clearedWp: PhoneWallpaper = {
+                        ...stagedWallpaper,
+                        placedEmojis: [],
+                        overlayEmoji: null,
+                      };
+                      setStagedWallpaper(clearedWp);
+                      setPhoneWallpaper(clearedWp);
+                      setPhoneFeedbackMsg("All emojis cleared!");
+                      setTimeout(() => setPhoneFeedbackMsg(null), 2000);
+                    };
+
+                    return (
+                      <div
+                        className="relative flex-1 min-h-0 flex flex-col justify-between overflow-hidden select-none"
+                        style={{ touchAction: 'none' }}
+                      >
+                        {/* Top Floating Control Bar (z-30) */}
+                        <div className="absolute top-2.5 inset-x-3 z-30 flex items-center justify-between pointer-events-auto">
+                          <button
+                            onClick={() => setPhoneAppView('settings_wallpaper_create')}
+                            className="px-2.5 py-1.5 rounded-xl bg-black/75 hover:bg-black text-white text-xs font-bold backdrop-blur-md border border-white/20 shadow-md flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                            title="Back to Apply Screen"
+                          >
+                            <span>◀</span>
+                            <span>Back</span>
+                          </button>
+
+                          <div className="px-3 py-1 rounded-full bg-black/80 text-white text-xs font-bold backdrop-blur-md border border-white/20 shadow-md flex items-center gap-1.5">
+                            <span className="text-emerald-400 font-extrabold">{currentCount}/15</span>
+                            <span className="text-slate-300 font-normal">Emojis Placed</span>
+                          </div>
+
+                          {currentCount > 0 ? (
+                            <button
+                              onClick={handleClearAllEmojis}
+                              className="px-2.5 py-1.5 rounded-xl bg-rose-600/85 hover:bg-rose-700 text-white text-[11px] font-bold backdrop-blur-md border border-white/20 shadow-md flex items-center gap-1 active:scale-95 transition cursor-pointer"
+                              title="Clear all set emojis"
+                            >
+                              <span>🗑️</span>
+                              <span>Clear</span>
+                            </button>
+                          ) : (
+                            <div className="w-12" />
+                          )}
+                        </div>
+
+                        {/* Interactive Drag & Zoom Canvas (Full Phone Viewport, NO APPS) */}
+                        <div
+                          ref={editorCanvasRef}
+                          onTouchStart={handleEditorTouchStart}
+                          onTouchMove={handleEditorTouchMove}
+                          onTouchEnd={handleEditorTouchEnd}
+                          onWheel={(e) => {
+                            e.stopPropagation();
+                            const delta = e.deltaY < 0 ? 0.08 : -0.08;
+                            setEditorEmojiScale((prev) => Math.max(0.35, Math.min(3.2, prev + delta)));
+                          }}
+                          className="absolute inset-0 z-10 overflow-hidden cursor-crosshair touch-none select-none"
+                        >
+                          {/* Previously Placed Emojis (Underneath active emoji, stacked anywhere) */}
+                          {placedList.map((item, idx) => (
+                            <div
+                              key={item.id || idx}
+                              className="absolute select-none pointer-events-none filter drop-shadow-xl flex items-center justify-center transition-all"
+                              style={{
+                                left: `${item.x}%`,
+                                top: `${item.y}%`,
+                                transform: 'translate(-50%, -50%)',
+                                fontSize: `${Math.round(80 * item.scale)}px`,
+                                lineHeight: 1,
+                                zIndex: 12 + idx,
+                              }}
+                            >
+                              {item.emoji}
+                            </div>
+                          ))}
+
+                          {/* Currently Active Emoji being moved & resized (Z-index 28, center or dragged location) */}
+                          <div
+                            onPointerDown={handleEditorPointerDown}
+                            onPointerMove={handleEditorPointerMove}
+                            onPointerUp={handleEditorPointerUp}
+                            onPointerCancel={handleEditorPointerUp}
+                            className="absolute select-none flex items-center justify-center cursor-grab active:cursor-grabbing touch-none active:scale-105 transition-transform"
+                            style={{
+                              left: `${editorEmojiX}%`,
+                              top: `${editorEmojiY}%`,
+                              transform: 'translate(-50%, -50%)',
+                              fontSize: `${Math.round(80 * editorEmojiScale)}px`,
+                              lineHeight: 1,
+                              zIndex: 28,
+                            }}
+                            title="Drag with finger or mouse to move left, right, up, down"
+                          >
+                            <span className="filter drop-shadow-[0_10px_20px_rgba(0,0,0,0.6)] select-none">
+                              {editorActiveEmoji}
+                            </span>
+
+                            {/* Active focus highlight with dashed boundary */}
+                            <div className="absolute inset-[-14px] border-2 border-dashed border-white rounded-2xl pointer-events-none shadow-[0_0_20px_rgba(255,255,255,0.7)] animate-pulse" />
+
+                            {/* Floating Drag Guide Pill */}
+                            <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-black/85 text-white text-[10px] font-bold whitespace-nowrap shadow-lg pointer-events-none flex items-center gap-1 border border-white/30 backdrop-blur-xs select-none">
+                              <span>👆 Drag</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Floating Size & Nudge Controls (Bottom Left, z-30) */}
+                        <div className="absolute bottom-4 left-3 z-30 flex flex-col gap-1.5 pointer-events-auto">
+                          {/* Zoom Bar: Zoom in (Chota) and Zoom out (Bada) */}
+                          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl bg-black/80 text-white backdrop-blur-md border border-white/20 shadow-xl">
+                            {/* Zoom In (Chota) */}
+                            <button
+                              onClick={() => setEditorEmojiScale((s) => Math.max(0.35, Math.round((s - 0.15) * 100) / 100))}
+                              className="w-7 h-7 rounded-xl bg-white/20 hover:bg-white/30 active:scale-90 flex items-center justify-center font-bold text-sm cursor-pointer transition text-white"
+                              title="Zoom In (Chota)"
+                            >
+                              −
+                            </button>
+
+                            {/* Scale Slider */}
+                            <input
+                              type="range"
+                              min="0.35"
+                              max="3.2"
+                              step="0.05"
+                              value={editorEmojiScale}
+                              onChange={(e) => setEditorEmojiScale(parseFloat(e.target.value))}
+                              className="w-20 sm:w-24 h-1.5 bg-white/30 rounded-lg appearance-none cursor-pointer accent-emerald-400"
+                              title="Resize emoji"
+                            />
+
+                            {/* Zoom Out (Bada) */}
+                            <button
+                              onClick={() => setEditorEmojiScale((s) => Math.max(0.35, Math.min(3.2, Math.round((s + 0.15) * 100) / 100)))}
+                              className="w-7 h-7 rounded-xl bg-white/20 hover:bg-white/30 active:scale-90 flex items-center justify-center font-bold text-sm cursor-pointer transition text-white"
+                              title="Zoom Out (Bada)"
+                            >
+                              +
+                            </button>
+
+                            <span className="text-[10px] font-mono text-emerald-300 font-bold min-w-8 text-right select-none">
+                              {Math.round(editorEmojiScale * 100)}%
+                            </span>
+                          </div>
+
+                          {/* Quick Nudge & Recenter Bar */}
+                          <div className="flex items-center gap-1 self-start px-2 py-1 rounded-xl bg-black/70 text-white backdrop-blur-md border border-white/10 shadow-lg">
+                            <button
+                              onClick={() => setEditorEmojiX((x) => Math.max(5, x - 3))}
+                              className="w-6 h-6 rounded-lg bg-white/10 hover:bg-white/20 active:scale-90 text-xs flex items-center justify-center cursor-pointer"
+                              title="Move Left"
+                            >
+                              ⬅️
+                            </button>
+                            <button
+                              onClick={() => setEditorEmojiX((x) => Math.min(95, x + 3))}
+                              className="w-6 h-6 rounded-lg bg-white/10 hover:bg-white/20 active:scale-90 text-xs flex items-center justify-center cursor-pointer"
+                              title="Move Right"
+                            >
+                              ➡️
+                            </button>
+                            <button
+                              onClick={() => setEditorEmojiY((y) => Math.max(8, y - 3))}
+                              className="w-6 h-6 rounded-lg bg-white/10 hover:bg-white/20 active:scale-90 text-xs flex items-center justify-center cursor-pointer"
+                              title="Move Up"
+                            >
+                              ⬆️
+                            </button>
+                            <button
+                              onClick={() => setEditorEmojiY((y) => Math.min(92, y + 3))}
+                              className="w-6 h-6 rounded-lg bg-white/10 hover:bg-white/20 active:scale-90 text-xs flex items-center justify-center cursor-pointer"
+                              title="Move Down"
+                            >
+                              ⬇️
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditorEmojiX(50);
+                                setEditorEmojiY(50);
+                                setEditorEmojiScale(1.0);
+                              }}
+                              className="px-1.5 h-6 rounded-lg bg-white/15 hover:bg-white/25 active:scale-90 text-[10px] font-bold flex items-center justify-center cursor-pointer text-slate-200"
+                              title="Re-center to 50% & 1x size"
+                            >
+                              Center
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Bottom Right Corner: SET Button */}
+                        <div className="absolute bottom-4 right-3 z-30 pointer-events-auto">
+                          <button
+                            onClick={handleSetEmoji}
+                            disabled={currentCount >= 15}
+                            className={`px-5 py-3 rounded-2xl font-black text-sm sm:text-base shadow-[0_10px_25px_rgba(0,0,0,0.5)] border-2 flex items-center gap-2 cursor-pointer transition-all active:scale-95 ${
+                              currentCount >= 15
+                                ? 'bg-slate-700 text-slate-400 border-slate-500 cursor-not-allowed'
+                                : 'bg-black hover:bg-slate-900 text-white border-emerald-400'
+                            }`}
+                          >
+                            <span className="w-5 h-5 rounded-full bg-emerald-500 text-black flex items-center justify-center text-xs font-black">
+                              ✓
+                            </span>
+                            <span>Set</span>
+                          </button>
+                        </div>
+
+                        {/* Success Modal / Action Dialog after clicking SET */}
+                        {editorModalOpen && (
+                          <div className="absolute inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in pointer-events-auto">
+                            <div className="w-full max-w-xs bg-white rounded-3xl p-5 shadow-2xl border border-slate-200 flex flex-col items-center text-center gap-3 animate-scale-up">
+                              <div className="w-16 h-16 rounded-2xl bg-emerald-50 border-2 border-emerald-500 flex items-center justify-center text-4xl shadow-md">
+                                {editorActiveEmoji}
+                              </div>
+
+                              <div className="flex flex-col gap-0.5">
+                                <h3 className="text-base font-extrabold text-black">Emoji Set to Wallpaper!</h3>
+                                <p className="text-xs text-slate-600">
+                                  Position and size locked onto mobile wallpaper.
+                                </p>
+                                <span className="inline-block mt-1 text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full self-center">
+                                  Total: {placedList.length} / 15 Emojis
+                                </span>
+                              </div>
+
+                              <div className="w-full flex flex-col gap-2 pt-2">
+                                <button
+                                  onClick={() => {
+                                    setEditorModalOpen(false);
+                                    setPhoneAppView('home');
+                                    setPhoneFeedbackMsg("Wallpaper Updated with Emojis!");
+                                    setTimeout(() => setPhoneFeedbackMsg(null), 2500);
+                                  }}
+                                  className="w-full py-2.5 px-3 rounded-xl bg-black hover:bg-slate-800 text-white font-bold text-xs sm:text-sm shadow-md flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition"
+                                >
+                                  <span>🏠</span>
+                                  <span>Go to Home Screen</span>
+                                </button>
+
+                                {placedList.length < 15 && (
+                                  <button
+                                    onClick={() => {
+                                      setEditorModalOpen(false);
+                                      setPhoneAppView('settings_wallpaper_image_categories');
+                                    }}
+                                    className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm shadow-md flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition"
+                                  >
+                                    <span>➕</span>
+                                    <span>Add Another Emoji ({15 - placedList.length} left)</span>
+                                  </button>
+                                )}
+
+                                <button
+                                  onClick={() => setEditorModalOpen(false)}
+                                  className="w-full py-1.5 rounded-lg text-slate-500 hover:text-black font-semibold text-xs cursor-pointer"
+                                >
+                                  Stay in Editor
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Bottom Home Indicator Bar */}
                   <div className="w-full flex justify-center pb-2 pt-1 bg-inherit">
